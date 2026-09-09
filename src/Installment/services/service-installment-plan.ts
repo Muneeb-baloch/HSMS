@@ -40,6 +40,7 @@ export const installmentPlanService = {
     const planData = {
       ...data,
       projId: new Types.ObjectId(data.projId),
+      societyId: (project as any).societyId,
       isActive: data.isActive !== undefined ? data.isActive : true,
       isDeleted: false,
       createdBy: userId,
