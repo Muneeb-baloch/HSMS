@@ -63,6 +63,7 @@ export interface CreateMemberDto {
   memAddr2?: string;
   memAddr3?: string;
   cityId?: string;
+  societyId?: string;
   memZipPost?: string;
   memContRes?: string;
   memContWork?: string;
@@ -131,6 +132,7 @@ export interface MemberQueryParams {
   search?: string;
   statusId?: string;
   cityId?: string;
+  societyId?: string;
   memIsOverseas?: boolean;
   isActive?: boolean;
   sortBy?: string;

@@ -193,7 +193,7 @@ export const memberService = {
     if (search) {
       query.$or = [
         { memName: { $regex: search, $options: 'i' } },
-        { memNIC: { $regex: search, $options: 'i' } }, // Changed from memNic to memNIC
+        { memNic: { $regex: search, $options: 'i' } },
         { memContMob: { $regex: search, $options: 'i' } },
         { memContEmail: { $regex: search, $options: 'i' } },
         { memRegNo: { $regex: search, $options: 'i' } },
@@ -202,13 +202,10 @@ export const memberService = {
 
     if (statusId) query.statusId = new Types.ObjectId(statusId);
     if (cityId) query.cityId = new Types.ObjectId(cityId);
+    if (params.societyId) query.societyId = new Types.ObjectId(params.societyId);
 
-    // memIsOverseas handling change
-    if (memIsOverseas !== undefined) {
-      // Always add to query
-      query.memIsOverseas = memIsOverseas;
-      console.log('memIsOverseas filter applied:', memIsOverseas);
-
+    // memIsOverseas handling - only if no search
+    if (memIsOverseas !== undefined && !search) {
       if (memIsOverseas === false) {
         query.$or = [{ memIsOverseas: false }, { memIsOverseas: { $exists: false } }];
       } else {

@@ -112,30 +112,6 @@ function sanitizeRequestBody(body: any): any {
   return sanitized;
 }
 
-// Sanitize response body
-function sanitizeResponseBody(body: any): any {
-  if (!body || typeof body !== 'object') {
-    return body;
-  }
-
-  const sanitized = { ...body };
-
-  // Remove large data or sensitive data from response logging
-  if (sanitized.data && Array.isArray(sanitized.data) && sanitized.data.length > 10) {
-    sanitized.data = `[Array with ${sanitized.data.length} items]`;
-  }
-
-  // Sanitize tokens in responses
-  if (sanitized.accessToken) {
-    sanitized.accessToken = '[REDACTED]';
-  }
-  if (sanitized.refreshToken) {
-    sanitized.refreshToken = '[REDACTED]';
-  }
-
-  return sanitized;
-}
-
 let mongooseQueryLoggingPatched = false;
 
 // Database query logging — patch once. Never wrap Query.exec per request (that leaks memory).

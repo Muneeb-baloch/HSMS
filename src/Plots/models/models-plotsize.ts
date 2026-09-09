@@ -3,6 +3,8 @@ import { Document, Model, Schema, Types, model } from 'mongoose';
 export interface IPlotSize extends Document {
   plotSizeName: string;
   societyId?: Types.ObjectId;
+  sizeLength: number;
+  sizeWidth: number;
   totalArea: number;
   areaUnit: string;
   ratePerUnit: number;
@@ -30,6 +32,18 @@ const plotSizeSchema = new Schema<IPlotSize>(
       ref: 'Society',
       index: true,
       default: null,
+    },
+
+    sizeLength: {
+      type: Number,
+      required: false,
+      min: [0.01, 'Length must be greater than 0'],
+    },
+
+    sizeWidth: {
+      type: Number,
+      required: false,
+      min: [0.01, 'Width must be greater than 0'],
     },
 
     totalArea: {
@@ -88,9 +102,9 @@ const plotSizeSchema = new Schema<IPlotSize>(
   }
 );
 
-// Pre-save middleware to calculate standardBasePrice if not provided
+// Pre-save middleware to calculate standardBasePrice
 plotSizeSchema.pre('save', function (next) {
-  // Only calculate if standardBasePrice is not explicitly set
+  // Calculate standardBasePrice from totalArea x ratePerUnit
   if (this.isModified('totalArea') || this.isModified('ratePerUnit')) {
     if (!this.isModified('standardBasePrice') || this.isNew) {
       this.standardBasePrice = parseFloat((this.totalArea * this.ratePerUnit).toFixed(2));
@@ -105,7 +119,6 @@ plotSizeSchema.pre('findOneAndUpdate', function (next) {
 
   // If totalArea or ratePerUnit is being updated, recalculate standardBasePrice
   if (update.totalArea !== undefined || update.ratePerUnit !== undefined) {
-    // Get the current document to calculate new price
     this.model
       .findOne(this.getQuery())
       .then((doc: any) => {

@@ -29,12 +29,12 @@ export const plotSizeController = {
         throw new AppError(400, 'Valid Total Area is required');
       }
 
-      if (!createData.ratePerUnit || createData.ratePerUnit < 0) {
-        throw new AppError(400, 'Valid Rate per Unit is required');
-      }
-
       if (!createData.areaUnit) {
         throw new AppError(400, 'Area Unit is required');
+      }
+
+      if (!createData.ratePerUnit || createData.ratePerUnit < 0) {
+        throw new AppError(400, 'Valid Rate per Unit is required');
       }
 
       // Check if plot size already exists

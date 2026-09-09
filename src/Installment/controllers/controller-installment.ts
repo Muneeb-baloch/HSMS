@@ -28,10 +28,6 @@ export const installmentController = {
       const createData: CreateInstallmentDto = req.body;
 
       // Validate required fields
-      if (!createData.fileId) {
-        throw new AppError(400, 'File ID is required');
-      }
-
       if (!createData.memId) {
         throw new AppError(400, 'Member ID is required');
       }

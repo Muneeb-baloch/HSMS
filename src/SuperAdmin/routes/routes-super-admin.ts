@@ -3,7 +3,7 @@ import { authenticate } from '../../auth/middleware/auth';
 import { requireSuperAdmin } from '../../middleware/tenant.middleware';
 import * as ctrl from '../controllers/controller-super-admin';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 // All routes require authentication + Super Admin role
 router.use(authenticate, requireSuperAdmin);

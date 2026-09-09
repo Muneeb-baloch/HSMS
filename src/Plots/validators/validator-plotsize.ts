@@ -22,6 +22,16 @@ export const validateCreatePlotSize = [
     .isFloat({ min: 0.01 })
     .withMessage('Total Area must be greater than 0'),
 
+  body('sizeLength')
+    .optional()
+    .isFloat({ min: 0.01 })
+    .withMessage('Length must be greater than 0'),
+
+  body('sizeWidth')
+    .optional()
+    .isFloat({ min: 0.01 })
+    .withMessage('Width must be greater than 0'),
+
   body('areaUnit')
     .notEmpty()
     .withMessage('Area Unit is required')

@@ -108,6 +108,7 @@ export const memberController = {
         search: req.query.search as string,
         statusId: req.query.statusId as string,
         cityId: req.query.cityId as string,
+        societyId: req.query.societyId as string,
         memIsOverseas: req.query.memIsOverseas === 'true',
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',

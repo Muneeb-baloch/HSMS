@@ -70,10 +70,13 @@ export const installmentService = {
     data: CreateInstallmentDto,
     userId: Types.ObjectId
   ): Promise<InstallmentInterface> {
-    // Check if file exists
-    const file = await File.findById(data.fileId);
-    if (!file || file.isDeleted) {
-      throw new Error('File not found');
+    // Check if file exists (only if fileId is provided)
+    let file = null;
+    if (data.fileId) {
+      file = await File.findById(data.fileId);
+      if (!file || file.isDeleted) {
+        throw new Error('File not found');
+      }
     }
 
     // Check if member exists
@@ -88,8 +91,8 @@ export const installmentService = {
       throw new Error('Plot not found');
     }
 
-    // Check if file's plotId matches the selected plot (File.plotId is source of truth)
-    if (file.plotId.toString() !== data.plotId) {
+    // Check if file's plotId matches the selected plot (only if file exists)
+    if (file && file.plotId.toString() !== data.plotId) {
       throw new Error('Plot does not belong to the specified file');
     }
 
@@ -99,8 +102,8 @@ export const installmentService = {
       throw new Error('Installment category not found');
     }
 
-    // Check if file belongs to member
-    if (file.memId.toString() !== data.memId) {
+    // Check if file belongs to member (only if file exists)
+    if (file && file.memId.toString() !== data.memId) {
       throw new Error('File does not belong to the specified member');
     }
 
@@ -120,6 +123,7 @@ export const installmentService = {
 
     const installmentData: any = {
       ...data,
+      societyId: (member as any).societyId,
       totalPayable: data.amountDue + (data.lateFeeSurcharge || 0),
       amountPaid: 0,
       balanceAmount: data.amountDue + (data.lateFeeSurcharge || 0),

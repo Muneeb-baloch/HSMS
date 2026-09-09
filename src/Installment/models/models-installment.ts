@@ -39,7 +39,7 @@ export enum PaymentMode {
 }
 
 export interface IInstallment extends Document {
-  fileId: Types.ObjectId;
+  fileId?: Types.ObjectId;
   memId: Types.ObjectId;
   plotId: Types.ObjectId;
   installmentCategoryId: Types.ObjectId;
@@ -82,7 +82,7 @@ const installmentSchema = new Schema<IInstallment>(
     fileId: {
       type: Schema.Types.ObjectId,
       ref: 'File',
-      required: true,
+      required: false,
       index: true,
     },
     memId: {

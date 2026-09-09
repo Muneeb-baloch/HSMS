@@ -10,7 +10,7 @@ import {
   validateMongoId,
 } from '../validator/validator-bulk-operations';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 // POST /export - Export data (ADMIN, SUPER_ADMIN only)
 router.post(

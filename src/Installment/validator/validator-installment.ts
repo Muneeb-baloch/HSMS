@@ -3,8 +3,7 @@ import { InstallmentStatus, InstallmentType, PaymentMode } from '../models/model
 
 export const validateCreateInstallment = (): ValidationChain[] => [
   body('fileId')
-    .notEmpty()
-    .withMessage('File ID is required')
+    .optional()
     .isMongoId()
     .withMessage('Invalid File ID'),
 
