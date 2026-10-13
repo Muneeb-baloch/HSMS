@@ -130,6 +130,14 @@ export const validateBulkInstallments = (): ValidationChain[] => [
     .withMessage('Installment title cannot exceed 200 characters'),
 ];
 
+export const validateGenerateFromPlan = (): ValidationChain[] => [
+  body('fileId')
+    .notEmpty()
+    .withMessage('File ID is required')
+    .isMongoId()
+    .withMessage('Invalid File ID'),
+];
+
 export const validateUpdateInstallment = (): ValidationChain[] => [
   body('installmentNo')
     .optional()

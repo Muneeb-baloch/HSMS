@@ -43,6 +43,7 @@ export interface IInstallment extends Document {
   memId: Types.ObjectId;
   plotId: Types.ObjectId;
   installmentCategoryId: Types.ObjectId;
+  planId?: Types.ObjectId;
   installmentNo: number;
   installmentTitle: string;
   installmentType: string;
@@ -101,6 +102,12 @@ const installmentSchema = new Schema<IInstallment>(
       type: Schema.Types.ObjectId,
       ref: 'InstallmentCategory',
       required: true,
+      index: true,
+    },
+    planId: {
+      type: Schema.Types.ObjectId,
+      ref: 'InstallmentPlan',
+      required: false,
       index: true,
     },
     installmentNo: {
@@ -289,6 +296,14 @@ installmentSchema.virtual('plot', {
 installmentSchema.virtual('installmentCategory', {
   ref: 'InstallmentCategory',
   localField: 'installmentCategoryId',
+  foreignField: '_id',
+  justOne: true,
+});
+
+// Virtual for installment plan
+installmentSchema.virtual('plan', {
+  ref: 'InstallmentPlan',
+  localField: 'planId',
   foreignField: '_id',
   justOne: true,
 });

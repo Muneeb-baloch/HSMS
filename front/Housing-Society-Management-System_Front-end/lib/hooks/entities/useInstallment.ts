@@ -5,6 +5,7 @@ import {
   BulkInstallmentCreationDto,
   BulkStatusUpdateDto,
   CreateInstallmentDto,
+  GenerateInstallmentsFromPlanDto,
   Installment,
   InstallmentDashboardSummary,
   InstallmentQueryParams,
@@ -333,6 +334,42 @@ export const useCreateBulkInstallments = () => {
     },
     onError: (error: Error) => {
       customToast.error(error.message || "Failed to create bulk installments");
+    },
+  });
+};
+
+export const useGenerateInstallmentsFromPlan = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (
+      data: GenerateInstallmentsFromPlanDto,
+    ): Promise<Installment[]> => {
+      const response = await apiClient.post<Installment[]>(
+        "/installment/generate-from-plan",
+        data,
+      );
+
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(
+        response.data.message || "Failed to generate installments from plan",
+      );
+    },
+    onSuccess: (data) => {
+      customToast.success(`Successfully generated ${data.length} installments`);
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    },
+    onError: (error: unknown) => {
+      let errorMessage = "Failed to generate installments from plan";
+      if (typeof error === "object" && error !== null && "response" in error) {
+        const axiosError = error as { response?: { data?: { error?: string } } };
+        errorMessage = axiosError.response?.data?.error || errorMessage;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      customToast.error(errorMessage);
     },
   });
 };

@@ -2,7 +2,13 @@
   "name": "hsms_front-end",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "npm": "please-use-pnpm",
+    "yarn": "please-use-pnpm"
+  },
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "dev": "next dev",
     "dev:watch": "next dev --webpack",
     "dev:turbo": "next dev",

@@ -7,6 +7,57 @@ import { FileStatus, PaymentMode } from "@/lib/types/file";
 const getMemberId = (v: unknown): string | undefined =>
   typeof v === "string" ? v : v && typeof v === "object" && "_id" in (v as object) ? String((v as { _id: string })._id) : undefined;
 
+// Auto-fill Down Payment and Total Amount once both Plan and Plot are selected:
+// - Down Payment = the Plan's "Down Payment" category row (percentage or fixed
+//   amount) applied against the selected Plot's actual price. This is a portion
+//   of Total Amount, paid upfront - not an addition on top of it.
+// - Total Amount = the selected Plot's actual price + the Plan's base/application
+//   charges (e.g. processing fee). Balance (computed server-side) is then
+//   Total Amount - Down Payment, i.e. what's left to pay via installments.
+const applyPlanAndPlotCalculations = async (form: any) => {
+  const values = form.getValues();
+  const planId = values.planId;
+  const plotId = values.plotId;
+  if (!planId || typeof planId !== "string") return;
+
+  try {
+    const requests: [Promise<any>, Promise<any> | null] = [
+      apiClient.get<{ data?: { totalAmount?: number } }>(`/installment-plans/${planId}`),
+      plotId && typeof plotId === "string"
+        ? apiClient.get<{ data?: { plotTotalAmount?: number } }>(`/plots/${plotId}`)
+        : null,
+    ];
+    const [planRes, plotRes] = await Promise.all(requests);
+
+    const planCharges = planRes?.data?.data?.totalAmount || 0;
+    const plotTotalAmount = plotRes?.data?.data?.plotTotalAmount || 0;
+
+    let downPayment = 0;
+    if (plotTotalAmount > 0) {
+      const detailsRes = await apiClient.get<{ data?: Array<any> }>(
+        `/installment-plan-details/plan/${planId}`
+      );
+      const details = detailsRes?.data?.data || [];
+      const downPaymentRow = details.find((d: any) =>
+        String(d?.instCatId?.instCatName || "").toLowerCase().includes("down")
+      );
+      if (downPaymentRow) {
+        downPayment =
+          downPaymentRow.fixedAmount > 0
+            ? downPaymentRow.fixedAmount
+            : Math.round((downPaymentRow.percentageAmount / 100) * plotTotalAmount * 100) / 100;
+        form.setValue("downPayment", downPayment);
+      }
+    }
+
+    if (planCharges > 0 || plotTotalAmount > 0) {
+      form.setValue("totalAmount", plotTotalAmount + planCharges);
+    }
+  } catch {
+    /* ignore - fields stay manual if this lookup fails */
+  }
+};
+
 export const fileFormFields: FieldConfig<FileFormData>[] = [
   {
     name: "fileRegNo",
@@ -45,6 +96,7 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     type: "relationship",
     required: false,
     showWhen: (values) => !!(values as { projId?: string }).projId,
+    dependsOn: "projId",
     relationship: {
       endpoint: (values) =>
         (values as { projId?: string }).projId
@@ -56,23 +108,8 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     },
     placeholder: "Select installment plan (optional)",
     description: "Choose the plan (plans shown for selected project)",
-    onChange: async (value, form) => {
-      if (value && typeof value === "string") {
-        try {
-          const res = await apiClient.get<{ data?: { totalAmount?: number } }>(
-            `/installment-plans/${value}`
-          );
-          if (
-            res?.data?.success &&
-            res?.data?.data?.totalAmount != null &&
-            res.data.data.totalAmount > 0
-          ) {
-            form.setValue("totalAmount", res.data.data.totalAmount);
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+    onChange: async (_value, form) => {
+      await applyPlanAndPlotCalculations(form);
     },
   },
   {
@@ -97,6 +134,7 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     type: "relationship",
     required: false,
     showWhen: (values) => !!getMemberId((values as { memId?: unknown }).memId),
+    dependsOn: "memId",
     relationship: {
       endpoint: (values) => {
         const memId = getMemberId((values as { memId?: unknown }).memId);
@@ -116,6 +154,7 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     type: "relationship",
     required: true,
     showWhen: (values) => !!(values as { projId?: string }).projId,
+    dependsOn: "projId",
     relationship: {
       endpoint: (values) =>
         (values as { projId?: string }).projId
@@ -128,6 +167,9 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     },
     placeholder: "Select plot",
     description: "Choose the plot for this file (required)",
+    onChange: async (_value, form) => {
+      await applyPlanAndPlotCalculations(form);
+    },
   },
   {
     name: "applicationId",
@@ -250,6 +292,7 @@ export const updateFileFormFields: FieldConfig<any>[] = [
     type: "relationship",
     required: false,
     showWhen: (values) => !!(values as { projId?: string }).projId,
+    dependsOn: "projId",
     relationship: {
       endpoint: (values) =>
         (values as { projId?: string }).projId
@@ -276,6 +319,7 @@ export const updateFileFormFields: FieldConfig<any>[] = [
     type: "relationship",
     required: false,
     showWhen: (values) => !!getMemberId((values as { memId?: unknown }).memId),
+    dependsOn: "memId",
     relationship: {
       endpoint: (values) => {
         const memId = getMemberId((values as { memId?: unknown }).memId);

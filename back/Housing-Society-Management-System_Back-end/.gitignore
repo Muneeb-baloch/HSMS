@@ -4,7 +4,9 @@ node_modules/
 
 # Keep pnpm-lock.yaml in git for reproducible installs (Vercel / CI).
 
-
+# this project uses pnpm only; block other package manager lockfiles
+package-lock.json
+yarn.lock
 
 # Build outputs
 

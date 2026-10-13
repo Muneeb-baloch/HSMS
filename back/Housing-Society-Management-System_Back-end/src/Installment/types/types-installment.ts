@@ -7,6 +7,7 @@ export interface InstallmentType {
   memId: Types.ObjectId;
   plotId: Types.ObjectId;
   installmentCategoryId: Types.ObjectId;
+  planId?: Types.ObjectId;
   installmentNo: number;
   installmentTitle: string;
   installmentType: InstallmentType;
@@ -33,6 +34,7 @@ export interface InstallmentType {
   member?: any;
   plot?: any;
   installmentCategory?: any;
+  plan?: any;
   createdByUser?: any;
   modifiedByUser?: any;
   isOverdue?: boolean;

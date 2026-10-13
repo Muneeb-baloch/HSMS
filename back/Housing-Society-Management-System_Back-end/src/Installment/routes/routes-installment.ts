@@ -8,6 +8,7 @@ import {
   validateBulkInstallments,
   validateBulkUpdateStatus,
   validateCreateInstallment,
+  validateGenerateFromPlan,
   validateGetInstallments,
   validatePaymentValidation,
   validateRecordPayment,
@@ -45,6 +46,15 @@ router.post(
   validateBulkInstallments(),
   validateRequest,
   installmentController.createBulkInstallments
+);
+
+router.post(
+  '/generate-from-plan',
+  authenticate,
+  requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  validateGenerateFromPlan(),
+  validateRequest,
+  installmentController.generateFromPlan
 );
 
 router.get(

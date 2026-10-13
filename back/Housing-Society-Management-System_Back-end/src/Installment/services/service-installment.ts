@@ -4,7 +4,9 @@ import Member from '../../Member/models/models-member';
 
 import Plot from '../../Plots/models/models-plot';
 import { InstallmentCategory } from '../index-installment-category';
-import Installment, { InstallmentStatus } from '../models/models-installment';
+import Installment, { InstallmentStatus, InstallmentType } from '../models/models-installment';
+import InstallmentPlan from '../models/models-installment-plan';
+import InstallmentPlanDetail from '../models/models-installment-plan-detail';
 import {
   BulkInstallmentCreationDto,
   CreateInstallmentDto,
@@ -57,6 +59,18 @@ const calculateNextDueDate = (
   }
 
   return date;
+};
+
+// Helper function to map a free-text installment category name to the
+// legacy InstallmentType enum (categories are admin-defined free text,
+// but installmentType is still validated against this fixed enum).
+const mapCategoryToInstallmentType = (categoryName: string): string => {
+  const normalized = categoryName.toLowerCase();
+  const match = Object.values(InstallmentType).find(
+    type =>
+      normalized.includes(type.toLowerCase()) || type.toLowerCase().includes(normalized)
+  );
+  return match || InstallmentType.OTHER;
 };
 
 export const installmentService = {
@@ -228,6 +242,103 @@ export const installmentService = {
       .populate('plot', 'plotNo plotSize')
       .populate('installmentCategory', 'instCatName instCatDescription')
       .populate('createdBy', 'userName fullName designation');
+
+    return populatedInstallments.map(doc => toPlainObject(doc));
+  },
+
+  /**
+   * Generate the full installment schedule for a File from its linked
+   * Installment Plan. Reads the Plan's InstallmentPlanDetail rows
+   * (category + occurrence + percentage/fixed amount), computes each
+   * installment's amount against the Plot's actual total price, and
+   * bulk-creates the real Installment ledger records.
+   */
+  async generateInstallmentsFromPlan(
+    fileId: string,
+    userId: Types.ObjectId
+  ): Promise<InstallmentInterface[]> {
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
+    }
+
+    const existingCount = await Installment.countDocuments({
+      fileId: file._id,
+      isDeleted: false,
+    });
+    if (existingCount > 0) {
+      throw new Error('Installments have already been generated for this file');
+    }
+
+    const plan = await InstallmentPlan.findById(file.planId);
+    if (!plan || !plan.isActive) {
+      throw new Error('Installment plan not found or inactive');
+    }
+
+    const plot = await Plot.findById(file.plotId);
+    if (!plot || plot.isDeleted) {
+      throw new Error('Plot not found');
+    }
+
+    const planDetails = await InstallmentPlanDetail.find({
+      planId: plan._id,
+      isDeleted: false,
+    })
+      .populate('instCatId', 'instCatName')
+      .sort({ occurrence: 1 });
+
+    if (planDetails.length === 0) {
+      throw new Error('Selected installment plan has no configured details');
+    }
+
+    const basisAmount = plot.plotTotalAmount;
+    const startDate = file.bookingDate || new Date();
+
+    const installments: any[] = [];
+
+    for (const detail of planDetails) {
+      const category = detail.instCatId as any;
+      const categoryName = category?.instCatName || 'Installment';
+
+      const amountDue =
+        detail.fixedAmount > 0
+          ? detail.fixedAmount
+          : Math.round((detail.percentageAmount / 100) * basisAmount * 100) / 100;
+
+      const dueDate = calculateNextDueDate(startDate, 'monthly', detail.occurrence);
+
+      installments.push({
+        fileId: file._id,
+        memId: file.memId,
+        plotId: file.plotId,
+        installmentCategoryId: detail.instCatId,
+        planId: plan._id,
+        installmentNo: detail.occurrence,
+        installmentTitle: `${categoryName} - #${detail.occurrence}`,
+        installmentType: mapCategoryToInstallmentType(categoryName),
+        dueDate,
+        amountDue,
+        lateFeeSurcharge: 0,
+        totalPayable: amountDue,
+        amountPaid: 0,
+        balanceAmount: amountDue,
+        status: InstallmentStatus.UNPAID,
+        isDeleted: false,
+        createdBy: userId,
+      });
+    }
+
+    const createdInstallments = await Installment.insertMany(installments);
+
+    const installmentIds = createdInstallments.map(inst => inst._id);
+    const populatedInstallments = await Installment.find({ _id: { $in: installmentIds } })
+      .populate('file', 'fileRegNo')
+      .populate('member', 'memName memNic')
+      .populate('plot', 'plotNo plotSize')
+      .populate('installmentCategory', 'instCatName instCatDescription')
+      .populate('plan', 'planName')
+      .populate('createdBy', 'userName fullName designation')
+      .sort({ installmentNo: 1 });
 
     return populatedInstallments.map(doc => toPlainObject(doc));
   },

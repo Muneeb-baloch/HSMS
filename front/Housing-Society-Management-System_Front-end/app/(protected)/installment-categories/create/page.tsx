@@ -32,7 +32,7 @@ export default function CreateInstallmentCategoryPage () {
   useEffect(() => {
     const fetchNextSequenceOrder = async () => {
       try {
-        const response = await apiClient.get('/installmentcategory?limit=1000')
+        const response = await apiClient.get('/installmentcategory?limit=100')
         if (response.data.success && response.data.data.categories) {
           const categories = response.data.data.categories
           const maxOrder = categories.reduce((max: number, cat: any) =>

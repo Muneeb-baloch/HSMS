@@ -29,6 +29,7 @@ import {
   FilePlus,
   Plus,
   RefreshCw,
+  Sparkles,
   TrendingUp,
   Users
 } from 'lucide-react'
@@ -70,6 +71,10 @@ export default function InstallmentsPage () {
 
   const handleBulkCreate = () => {
     router.push('/installments/bulk-create')
+  }
+
+  const handleGenerateFromPlan = () => {
+    router.push('/installments/generate-from-plan')
   }
 
   const handleEdit = (id: string) => {
@@ -442,6 +447,10 @@ export default function InstallmentsPage () {
               <Button variant='glass' size='sm' onClick={handleBulkCreate}>
                 <FilePlus className='size-4' />
                 Bulk Create
+              </Button>
+              <Button variant='glass' size='sm' onClick={handleGenerateFromPlan}>
+                <Sparkles className='size-4' />
+                Generate from Plan
               </Button>
             </>
           )

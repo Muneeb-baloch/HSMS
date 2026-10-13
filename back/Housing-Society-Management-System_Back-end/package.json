@@ -3,7 +3,13 @@
   "version": "1.0.0",
   "description": "Node.js/Express TypeScript API",
   "main": "dist/app.js",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "npm": "please-use-pnpm",
+    "yarn": "please-use-pnpm"
+  },
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "dev": "tsc -p tsconfig.json --incremental --pretty false --noCheck --declaration false --sourceMap false && LITE_MODE=1 UV_THREADPOOL_SIZE=2 node --max-old-space-size=192 --max-semi-space-size=4 --optimize-for-size dist/server.js",
     "dev:watch": "tsx watch --clear-screen=false src/server.ts",
     "dev:tsnd": "ts-node-dev --respawn --transpile-only src/server.ts",

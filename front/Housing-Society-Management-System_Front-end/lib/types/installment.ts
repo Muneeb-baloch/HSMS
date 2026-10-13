@@ -48,6 +48,7 @@ export interface Installment {
   installmentCategoryId:
     | string
     | { _id: string; instCatName: string; instCatDescription?: string };
+  planId?: string | { _id: string; planName: string };
   installmentNo: number;
   installmentTitle: string;
   installmentType: InstallmentType;
@@ -124,6 +125,10 @@ export interface RecordPaymentDto {
   paymentMode: PaymentMode;
   transactionRefNo?: string;
   remarks?: string;
+}
+
+export interface GenerateInstallmentsFromPlanDto {
+  fileId: string;
 }
 
 export interface BulkInstallmentCreationDto {

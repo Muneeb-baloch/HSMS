@@ -1,5 +1,5 @@
 import { Model, Schema, Types, model } from 'mongoose';
-import { toBaseSqft } from '../../common/utils/areaUnits';
+import { toBaseSqft, fromBaseSqft, isAreaUnit } from '../../common/utils/areaUnits';
 
 // @deprecated - use LookupValue collection (category: 'plot_type') instead
 export enum PlotType {
@@ -211,7 +211,14 @@ const plotSchema = new Schema<IPlot, any, IPlotMethods>(
       type: Date,
       validate: {
         validator: function (value: Date) {
-          return !value || value <= new Date();
+          if (!value) return true;
+          // discountDate is a date-only value (parsed as UTC midnight), so
+          // compare against the end of today in UTC rather than the exact
+          // current instant - otherwise "today" is wrongly rejected for any
+          // user whose local time has rolled over past midnight UTC+.
+          const endOfTodayUTC = new Date();
+          endOfTodayUTC.setUTCHours(23, 59, 59, 999);
+          return value <= endOfTodayUTC;
         },
         message: 'Discount Date cannot be in the future',
       },
@@ -483,7 +490,13 @@ plotSchema.virtual('formattedTotalAmount').get(function () {
 plotSchema.virtual('formattedArea').get(function () {
   if (!this.plotArea && this.plotArea !== 0) return 'N/A';
   if (!this.plotAreaUnit) return `${this.plotArea.toLocaleString()}`;
-  return `${this.plotArea.toLocaleString()} ${this.plotAreaUnit}`;
+  // plotArea/areaBase are always stored in square feet internally;
+  // convert back to the plot's display unit (e.g. marla) before formatting.
+  if (!isAreaUnit(this.plotAreaUnit)) {
+    return `${this.plotArea.toLocaleString()} ${this.plotAreaUnit}`;
+  }
+  const displayValue = fromBaseSqft(this.areaBase ?? this.plotArea, this.plotAreaUnit, 2);
+  return `${displayValue.toLocaleString()} ${this.plotAreaUnit}`;
 });
 
 // Virtual for dimensions with unit

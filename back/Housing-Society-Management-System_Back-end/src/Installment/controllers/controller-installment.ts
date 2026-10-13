@@ -136,6 +136,55 @@ export const installmentController = {
   },
 
   /**
+   * Generate the installment schedule for a File from its linked Installment Plan
+   */
+  generateFromPlan: async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        throw new AppError(401, 'Authentication required');
+      }
+
+      const { fileId } = req.body;
+      if (!fileId) {
+        throw new AppError(400, 'File ID is required');
+      }
+
+      const installments = await installmentService.generateInstallmentsFromPlan(
+        fileId,
+        req.user.userId
+      );
+
+      res.status(201).json({
+        success: true,
+        data: installments,
+        message: `Successfully generated ${installments.length} installments from plan`,
+      });
+    } catch (error: any) {
+      if (error instanceof AppError) {
+        return handleError(error, next);
+      }
+
+      // Translate known business-rule errors from the service into proper
+      // 4xx responses instead of falling through as a generic 500.
+      const message = error?.message || '';
+      if (message === 'File not found' || message === 'Plot not found') {
+        return handleError(new AppError(404, message), next);
+      }
+      if (
+        message === 'Installment plan not found or inactive' ||
+        message === 'Selected installment plan has no configured details'
+      ) {
+        return handleError(new AppError(400, message), next);
+      }
+      if (message === 'Installments have already been generated for this file') {
+        return handleError(new AppError(409, message), next);
+      }
+
+      handleError(error, next);
+    }
+  },
+
+  /**
    * Get installment by ID
    */
   getInstallment: async (req: Request, res: Response, next: NextFunction) => {
