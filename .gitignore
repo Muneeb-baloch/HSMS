@@ -12,6 +12,8 @@ dist/
 
 coverage/
 
+.next/
+
 
 
 # Environment variables

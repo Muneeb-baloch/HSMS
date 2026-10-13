@@ -1,0 +1,52 @@
+---
+description: Housing Society Management System - UI/UX Consistency Standards
+globs: ["**/*.tsx", "**/*.ts"]
+---
+
+# HSMS UI Consistency Rules
+
+Apply these standards to every list/dashboard page in the Housing Society Management System.
+
+## 1. Page Layout Order
+1. Page title (h1, text-2xl font-bold text-foreground)
+2. Description (text-muted-foreground mt-1)
+3. Summary cards (grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4)
+4. ActionBar (left: filters/export/refresh, right: Add New)
+5. Filter section (if applicable) with FilterSection component
+6. Data table (text-sm, consistent padding)
+
+Wrap content in: `<div className="space-y-6">`
+
+## 2. Summary Cards
+- Use `SummaryCard` from `@/components/shared/SummaryCard`
+- Pass `icon` as Lucide icon component (e.g. `icon={Users}`)
+- Use `iconBgClassName="bg-{color}-500/20"` and `iconClassName="text-{color}-400"`
+- Use `gradient="from-{color}-500/10 to-transparent"` for glass effect
+- Every page must have at least 1 summary card; typically 4
+
+## 3. ActionBar
+- Import from `@/components/shared/PageTemplate`
+- **left**: Reset Filters, Export, Refresh, bulk actions (use `variant="glass"` buttons)
+- **right**: Add New button (use `variant="primary"` button)
+- Use `size="sm"` and icon `className="size-4"` on buttons
+
+## 4. Button Variants
+- **primary**: Add New, Create - gradient, emerald/teal
+- **glass**: Export, Refresh, Reset Filters, Import - glass effect with border-white/10
+
+## 5. Table
+- Use `text-sm` for table content
+- Cell padding: `px-4 py-3`
+- Header: `font-semibold`, `bg-white/5`
+- Rows: `hover:bg-white/5`, alternating `even:bg-white/[0.02]`
+
+## 6. Filter Section
+- Use `FilterSection` from `@/components/shared/FilterSection` for labeled filter groups
+- Use `FilterChip` for active filters display
+- Every filter must have clear label (e.g. "Filter by Status")
+
+## 7. Spacing
+- Section gap: `space-y-6`
+- Card grid: `gap-4`
+- Button groups: `gap-3`
+- Card padding: `p-6`

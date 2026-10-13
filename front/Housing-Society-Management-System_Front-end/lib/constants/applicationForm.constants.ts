@@ -1,0 +1,198 @@
+// src/lib/constants/applicationForm.constants.ts
+import { FieldConfig } from "@/components/shared/EntityForm/EntityForm";
+import { ApplicationFormData } from "@/lib/schemas/application.schema";
+import { EntityType } from "@/lib/types/upload.types";
+
+export const applicationFormFields: FieldConfig<ApplicationFormData>[] = [
+  {
+    name: "applicationTypeID",
+    label: "Application Type",
+    type: "relationship",
+    required: true,
+    relationship: {
+      endpoint: "/applicationtype/all",
+      labelField: "applicationName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted && item.isActive,
+    },
+    placeholder: "Select application type",
+    description: "Choose the type of application",
+  },
+  {
+    name: "memId",
+    label: "Member",
+    type: "relationship",
+    required: true,
+    relationship: {
+      endpoint: "/members",
+      labelField: "memName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+    },
+    placeholder: "Select member",
+    description: "Choose the member for this application",
+  },
+  {
+    name: "plotId",
+    label: "Plot",
+    type: "relationship",
+    required: false,
+    dependsOn: "memId",
+    relationship: {
+      endpoint: "/plots",
+      labelField: "plotNo",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+      queryParams: (values: any) => (values.memId ? { memId: values.memId } : {}),
+    },
+    placeholder: "Select plot (optional)",
+    description: "Choose a plot linked to the selected member",
+  },
+  {
+    name: "applicationDate",
+    label: "Application Date",
+    type: "date",
+    required: true,
+    placeholder: "Select application date",
+    description: "Date when the application was submitted",
+  },
+  {
+    name: "statusId",
+    label: "Status",
+    type: "relationship",
+    required: true,
+    relationship: {
+      endpoint: "/status",
+      labelField: "statusName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+    },
+    placeholder: "Select status",
+    description: "Current status of the application",
+  },
+  {
+    name: "remarks",
+    label: "Remarks",
+    type: "textarea",
+    required: false,
+    placeholder: "Enter any additional remarks",
+    description: "Additional notes about the application",
+    rows: 3,
+  },
+  {
+    name: "attachmentPath",
+    label: "Attachment",
+    type: "file-upload",
+    required: false,
+    placeholder: "Upload a document, PDF, or image",
+    description: "Upload supporting documents (PDF, images, or documents)",
+    uploadConfig: {
+      entityType: EntityType.APPLICATION,
+      entityId: "temp-application", // Will be overridden in pages
+      maxSize: 10 * 1024 * 1024, // 10MB
+      acceptedFileTypes: ["image/*", ".pdf", ".doc", ".docx", ".txt"],
+      allowMultipleTypes: true,
+    },
+  },
+];
+
+export const updateApplicationFormFields: FieldConfig<any>[] = [
+  {
+    name: "applicationTypeID",
+    label: "Application Type",
+    type: "relationship",
+    required: false,
+    relationship: {
+      endpoint: "/applicationtype/all",
+      labelField: "applicationName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted && item.isActive,
+    },
+    placeholder: "Select application type",
+    description: "Choose the type of application",
+  },
+  {
+    name: "memId",
+    label: "Member",
+    type: "relationship",
+    required: false,
+    relationship: {
+      endpoint: "/members",
+      labelField: "memName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+    },
+    placeholder: "Select member",
+    description: "Choose the member for this application",
+  },
+  {
+    name: "plotId",
+    label: "Plot",
+    type: "relationship",
+    required: false,
+    dependsOn: "memId",
+    relationship: {
+      endpoint: "/plots",
+      labelField: "plotNo",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+      queryParams: (values: any) => (values.memId ? { memId: values.memId } : {}),
+    },
+    placeholder: "Select plot (optional)",
+    description: "Choose a plot linked to the selected member",
+  },
+  {
+    name: "applicationDate",
+    label: "Application Date",
+    type: "date",
+    required: false,
+    placeholder: "Select application date",
+    description: "Date when the application was submitted",
+  },
+  {
+    name: "statusId",
+    label: "Status",
+    type: "relationship",
+    required: false,
+    relationship: {
+      endpoint: "/status",
+      labelField: "statusName",
+      valueField: "_id",
+      searchable: true,
+      filter: (item: any) => !item.isDeleted,
+    },
+    placeholder: "Select status",
+    description: "Current status of the application",
+  },
+  {
+    name: "remarks",
+    label: "Remarks",
+    type: "textarea",
+    required: false,
+    placeholder: "Enter any additional remarks",
+    description: "Additional notes about the application",
+    rows: 3,
+  },
+  {
+    name: "attachmentPath",
+    label: "Attachment",
+    type: "file-upload",
+    required: false,
+    placeholder: "Upload a document, PDF, or image",
+    description: "Upload supporting documents (PDF, images, or documents)",
+    uploadConfig: {
+      entityType: EntityType.APPLICATION,
+      entityId: "temp-application", // Will be overridden in pages
+      maxSize: 10 * 1024 * 1024, // 10MB
+      acceptedFileTypes: ["image/*", ".pdf", ".doc", ".docx", ".txt"],
+      allowMultipleTypes: true,
+    },
+  },
+];
