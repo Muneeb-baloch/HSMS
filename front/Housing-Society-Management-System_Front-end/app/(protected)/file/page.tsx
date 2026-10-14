@@ -141,7 +141,7 @@ export default function FilesPage () {
         item.member?.memName ?? 'Unknown',
         item.project?.projName ?? '-',
         item.plot?.plotNo ?? '-',
-        item.totalAmount,
+        item.contractPrice,
         item.downPayment,
         item.paymentMode,
         item.status,
@@ -214,7 +214,7 @@ export default function FilesPage () {
         options: [
           { label: 'File No', value: 'fileRegNo' },
           { label: 'Booking Date', value: 'bookingDate' },
-          { label: 'Total Amount', value: 'totalAmount' },
+          { label: 'Contract Price', value: 'contractPrice' },
           { label: 'Created Date', value: 'createdAt' },
           { label: 'Updated Date', value: 'updatedAt' }
         ],

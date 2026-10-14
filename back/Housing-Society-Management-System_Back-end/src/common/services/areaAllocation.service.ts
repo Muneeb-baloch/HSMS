@@ -72,7 +72,7 @@ export async function reserveAreaOnParent(
  * Detects MongoDB's "transactions require a replica set / mongos" error, which is
  * thrown on first use of a transaction against a standalone mongod.
  */
-function isTransactionsUnsupportedError(err: any): boolean {
+export function isTransactionsUnsupportedError(err: any): boolean {
   const msg = String(err?.message || err?.errmsg || '');
   return (
     /Transaction numbers are only allowed on a replica set member or mongos/i.test(msg) ||
@@ -123,6 +123,38 @@ export async function reserveThenAct<T>(params: {
         });
         throw actionErr;
       }
+    }
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
+ * Runs `action` inside a real multi-document transaction when the MongoDB
+ * deployment supports one (replica set / mongos, as local dev is now
+ * configured to be), falling back to running it without a session on a
+ * standalone mongod (no atomicity guarantee in that case, but the same code
+ * path executes either way rather than branching at call sites).
+ *
+ * Use this when a flow has no natural "reserve/release" step (unlike
+ * reserveThenAct above) — just two or more writes that must commit together.
+ */
+export async function runInTransaction<T>(
+  action: (session: ClientSession | undefined) => Promise<T>
+): Promise<T> {
+  const session = await mongoose.startSession();
+  try {
+    try {
+      let result: T | undefined;
+      await session.withTransaction(async () => {
+        result = await action(session);
+      });
+      return result as T;
+    } catch (err: any) {
+      if (!isTransactionsUnsupportedError(err)) {
+        throw err;
+      }
+      return await action(undefined);
     }
   } finally {
     await session.endSession();

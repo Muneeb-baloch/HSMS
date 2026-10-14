@@ -1,7 +1,17 @@
 // src/database/File/services/service-file.ts
 import { Types } from 'mongoose';
 import Application from '../../Application/models/models-application';
+import { runInTransaction } from '../../common/services/areaAllocation.service';
+import Installment from '../../Installment/models/models-installment';
+import InstallmentCategory, {
+  InstallmentCategoryKind,
+} from '../../Installment/models/models-installment-category';
 import InstallmentPlan from '../../Installment/models/models-installment-plan';
+import InstallmentPlanDetail from '../../Installment/models/models-installment-plan-detail';
+import {
+  buildInstallmentRows,
+  RECONCILIATION_TOLERANCE,
+} from '../../Installment/services/service-installment';
 import Member from '../../Member/models/models-member';
 import Nominee from '../../Nominee/models/models-nominee';
 import Plot from '../../Plots/models/models-plot';
@@ -30,6 +40,141 @@ const toPlainObject = (doc: any): FileType => {
   }
 
   return plainObj as FileType;
+};
+
+/**
+ * Attaches the real, ledger-derived downPayment/balanceAmount/paymentPercentage
+ * onto one or more File response objects. These can't be Mongoose virtuals
+ * (they require an async Installment query), so every read path that returns
+ * File data to a caller must route through here instead of trusting the
+ * schema-level balanceAmount fallback (which only holds pre-generation).
+ *
+ * Batches a single aggregation across all given files rather than querying
+ * per-file, so list endpoints stay cheap.
+ */
+const attachFinancials = async <T extends FileType>(files: T[]): Promise<T[]> => {
+  if (files.length === 0) return files;
+
+  const fileIds = files.map(f => new Types.ObjectId(String((f as any)._id ?? (f as any).id)));
+
+  const downPaymentCategoryIds = await InstallmentCategory.find({
+    kind: InstallmentCategoryKind.DOWN_PAYMENT,
+  }).distinct('_id');
+
+  // "Reconciled" kinds are the ones whose amounts make up contractPrice
+  // (down payment + financed installments). Possession/legal/other fees are
+  // real charges tracked on the ledger but NOT part of the plot price — so a
+  // payment against a fee must not move the plot balance. This is why we keep
+  // two figures: plotBalance (reconciled only) and totalOutstanding (all).
+  const reconciledCategoryIds = await InstallmentCategory.find({
+    kind: { $in: [InstallmentCategoryKind.DOWN_PAYMENT, InstallmentCategoryKind.INSTALLMENT] },
+  }).distinct('_id');
+
+  const ledgerStats = await Installment.aggregate([
+    { $match: { fileId: { $in: fileIds }, isDeleted: false } },
+    {
+      $group: {
+        _id: '$fileId',
+        downPayment: {
+          $sum: {
+            $cond: [{ $in: ['$installmentCategoryId', downPaymentCategoryIds] }, '$amountDue', 0],
+          },
+        },
+        downPaymentPaid: {
+          $sum: {
+            $cond: [{ $in: ['$installmentCategoryId', downPaymentCategoryIds] }, '$amountPaid', 0],
+          },
+        },
+        // Reconciled (plot) rows only — these back the plot balance.
+        reconciledPaid: {
+          $sum: {
+            $cond: [{ $in: ['$installmentCategoryId', reconciledCategoryIds] }, '$amountPaid', 0],
+          },
+        },
+        reconciledLateFees: {
+          $sum: {
+            $cond: [
+              { $in: ['$installmentCategoryId', reconciledCategoryIds] },
+              '$lateFeeSurcharge',
+              0,
+            ],
+          },
+        },
+        // Every non-cancelled row's own outstanding (due + lateFee − paid) —
+        // this is the all-in total outstanding including fees.
+        totalOutstanding: {
+          $sum: {
+            $cond: [
+              { $ne: ['$status', 'Cancelled'] },
+              {
+                $subtract: [{ $add: ['$amountDue', '$lateFeeSurcharge'] }, '$amountPaid'],
+              },
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  const statsByFileId = new Map(ledgerStats.map(s => [s._id.toString(), s]));
+
+  return files.map(file => {
+    const id = String((file as any)._id ?? (file as any).id);
+    const stats = statsByFileId.get(id);
+    const contractPrice = file.contractPrice ?? 0;
+
+    if (!stats) {
+      // No ledger generated yet for this file — nothing paid, nothing due.
+      return {
+        ...file,
+        downPayment: 0,
+        downPaymentPaid: 0,
+        downPaymentStatus: 'none',
+        balanceAmount: contractPrice,
+        plotBalance: contractPrice,
+        totalOutstanding: contractPrice,
+        paymentPercentage: 0,
+      };
+    }
+
+    // Plot balance: what's still owed on the plot itself (contract price plus
+    // any late fees on plot rows, minus what's been paid toward plot rows).
+    // Paying a possession/legal fee does NOT reduce this.
+    const plotBalance =
+      Math.round((contractPrice + stats.reconciledLateFees - stats.reconciledPaid) * 100) / 100;
+    // Total outstanding: everything still owed across all rows incl. fees.
+    const totalOutstanding = Math.round(stats.totalOutstanding * 100) / 100;
+    // paymentPercentage tracks plot progress (reconciled paid vs contract price).
+    const paymentPercentage =
+      contractPrice > 0 ? Math.round((stats.reconciledPaid / contractPrice) * 100) : 0;
+
+    const downPayment = Math.round(stats.downPayment * 100) / 100;
+    const downPaymentPaid = Math.round((stats.downPaymentPaid || 0) * 100) / 100;
+    // 'none' = this plan has no down-payment row; 'paid'/'partial'/'unpaid'
+    // reflect how much of that row has actually been collected.
+    const downPaymentStatus =
+      downPayment <= 0
+        ? 'none'
+        : downPaymentPaid >= downPayment
+          ? 'paid'
+          : downPaymentPaid > 0
+            ? 'partial'
+            : 'unpaid';
+
+    return {
+      ...file,
+      downPayment,
+      downPaymentPaid,
+      downPaymentStatus,
+      // balanceAmount keeps its validated meaning = plot balance (back-compat
+      // for existing readers); plotBalance is the explicit alias.
+      balanceAmount: plotBalance,
+      plotBalance,
+      totalOutstanding,
+      paymentPercentage,
+    };
+  });
 };
 
 export const fileService = {
@@ -110,9 +255,39 @@ export const fileService = {
       throw new Error('Plot is already allocated to another file');
     }
 
-    // Validate down payment
-    if (data.downPayment > data.totalAmount) {
-      throw new Error('Down payment cannot exceed total amount');
+    // contractPrice is the file's one authoritative price, snapshotted from the
+    // plot's current price at this exact moment and frozen from here on — never
+    // client-supplied, never silently recomputed by a later plot-price edit.
+    const contractPrice = plot.plotTotalAmount;
+    const priceSnapshotAt = new Date();
+    const bookingDate = data.bookingDate || new Date();
+
+    // Build (but don't yet persist) the full installment schedule up front so
+    // a bad plan configuration is caught before anything is written, and the
+    // reconciliation check runs against the exact rows that will be inserted.
+    const planDetails = await InstallmentPlanDetail.find({
+      planId: plan._id,
+      isDeleted: false,
+    })
+      .populate('instCatId', 'instCatName kind')
+      .sort({ occurrence: 1 });
+
+    if (planDetails.length === 0) {
+      throw new Error('Selected installment plan has no configured details');
+    }
+
+    const { rows, reconciledTotal } = buildInstallmentRows({
+      contractPrice,
+      startDate: bookingDate,
+      planDetails,
+    });
+
+    if (Math.abs(reconciledTotal - contractPrice) > RECONCILIATION_TOLERANCE) {
+      throw new Error(
+        `Plan "${plan.planName}" does not reconcile: down payment + installment rows sum to ` +
+          `${reconciledTotal}, but the plot's price is ${contractPrice}. Fix the plan's ` +
+          'percentages/fixed amounts before booking against it.'
+      );
     }
 
     // Generate file registration number if not provided
@@ -133,16 +308,38 @@ export const fileService = {
     const fileData: any = {
       ...data,
       fileRegNo,
+      contractPrice,
+      priceSnapshotAt,
+      bookingDate,
       status: FileStatus.PENDING,
       isActive: true,
       createdBy: userId,
       isDeleted: false,
     };
 
-    const file = await File.create(fileData);
+    // File creation + full ledger generation commit together: either both
+    // land, or neither does. No window where a File exists with a missing or
+    // half-written Installment schedule.
+    const createdFileId = await runInTransaction(async session => {
+      const sessionOpt = session ? { session } : undefined;
+      const [created] = await File.create([fileData], sessionOpt);
+
+      const installmentDocs = rows.map(row => ({
+        ...row,
+        fileId: created._id,
+        planId: plan._id,
+        societyId: created.societyId,
+        isDeleted: false,
+        createdBy: userId,
+      }));
+
+      await Installment.insertMany(installmentDocs, { ...sessionOpt, ordered: true });
+
+      return created._id;
+    });
 
     // Populate with detailed plot information
-    const createdFile = await File.findById(file._id)
+    const createdFile = await File.findById(createdFileId)
       .populate('plan', 'planName totalMonths totalAmount projId')
       .populate('member', 'memName memNic mobileNo')
       .populate('nominee', 'nomineeName relationWithMember nomineeCNIC nomineeContact')
@@ -180,7 +377,8 @@ export const fileService = {
       throw new Error('Failed to create file');
     }
 
-    return toPlainObject(createdFile);
+    const [withFinancials] = await attachFinancials([toPlainObject(createdFile)]);
+    return withFinancials;
   },
 
   /**
@@ -231,7 +429,8 @@ export const fileService = {
         throw new Error('File not found');
       }
 
-      return toPlainObject(file);
+      const [withFinancials] = await attachFinancials([toPlainObject(file)]);
+      return withFinancials;
     } catch (error) {
       if (error instanceof Error) {
         throw error;
@@ -267,7 +466,8 @@ export const fileService = {
       .populate('createdBy', 'firstName lastName email');
 
     if (!file) return null;
-    return toPlainObject(file);
+    const [withFinancials] = await attachFinancials([toPlainObject(file)]);
+    return withFinancials;
   },
 
   /**
@@ -290,7 +490,8 @@ export const fileService = {
       });
 
     if (!file) return null;
-    return toPlainObject(file);
+    const [withFinancials] = await attachFinancials([toPlainObject(file)]);
+    return withFinancials;
   },
 
   /**
@@ -371,9 +572,9 @@ export const fileService = {
     }
 
     if (minAmount !== undefined || maxAmount !== undefined) {
-      query.totalAmount = {};
-      if (minAmount !== undefined) query.totalAmount.$gte = minAmount;
-      if (maxAmount !== undefined) query.totalAmount.$lte = maxAmount;
+      query.contractPrice = {};
+      if (minAmount !== undefined) query.contractPrice.$gte = minAmount;
+      if (maxAmount !== undefined) query.contractPrice.$lte = maxAmount;
     }
 
     if (fromDate || toDate) {
@@ -429,7 +630,7 @@ export const fileService = {
     ]);
 
     return {
-      files,
+      files: await attachFinancials(files),
       pagination: {
         page,
         limit,
@@ -515,14 +716,9 @@ export const fileService = {
       }
     }
 
-    // Validate down payment
-    if (data.downPayment !== undefined) {
-      const totalAmount =
-        data.totalAmount !== undefined ? data.totalAmount : existingFile.totalAmount;
-      if (data.downPayment > totalAmount) {
-        throw new Error('Down payment cannot exceed total amount');
-      }
-    }
+    // contractPrice is not client-writable through this path (no deliberate
+    // revision workflow exists yet — see plan notes); UpdateFileDto no longer
+    // carries it, so there's nothing to cross-validate here anymore.
 
     // Handle status changes
     const updateObj: any = {
@@ -555,7 +751,9 @@ export const fileService = {
       })
       .populate('modifiedBy', 'firstName lastName email');
 
-    return file ? toPlainObject(file) : null;
+    if (!file) return null;
+    const [withFinancials] = await attachFinancials([toPlainObject(file)]);
+    return withFinancials;
   },
 
   /**
@@ -626,7 +824,7 @@ export const fileService = {
       .sort({ bookingDate: -1 })
       .then(docs => docs.map(doc => toPlainObject(doc)));
 
-    return files;
+    return attachFinancials(files);
   },
 
   /**
@@ -683,7 +881,7 @@ export const fileService = {
     ]);
 
     return {
-      files,
+      files: await attachFinancials(files),
       total,
       pages: Math.ceil(total / limit),
     };
@@ -734,7 +932,7 @@ export const fileService = {
     ]);
 
     return {
-      files,
+      files: await attachFinancials(files),
       total,
       pages: Math.ceil(total / limit),
     };
@@ -783,7 +981,9 @@ export const fileService = {
         },
       });
 
-    return updatedFile ? toPlainObject(updatedFile) : null;
+    if (!updatedFile) return null;
+    const [withFinancials] = await attachFinancials([toPlainObject(updatedFile)]);
+    return withFinancials;
   },
 
   /**
@@ -812,15 +1012,18 @@ export const fileService = {
         : `Adjusted on ${data.adjustmentDate}. Type: ${data.adjustmentType}, Amount: ${data.adjustmentAmount}, Reason: ${data.adjustmentReason}`,
     };
 
-    // Handle different adjustment types
+    // Handle different adjustment types. downPayment is no longer touched here
+    // — it's derived from the Installment ledger, not a stored field this can
+    // $set. Whether a REFUND should also reverse/cancel ledger rows is a real
+    // question but explicitly out of scope for this pass; this only keeps
+    // contractPrice itself consistent.
     switch (data.adjustmentType) {
       case 'REFUND':
-        updateObj.totalAmount = Math.max(0, file.totalAmount - data.adjustmentAmount);
-        updateObj.downPayment = Math.max(0, file.downPayment - data.adjustmentAmount);
+        updateObj.contractPrice = Math.max(0, file.contractPrice - data.adjustmentAmount);
         break;
 
       case 'CREDIT':
-        updateObj.totalAmount = file.totalAmount + data.adjustmentAmount;
+        updateObj.contractPrice = file.contractPrice + data.adjustmentAmount;
         break;
 
       case 'TRANSFER':
@@ -844,7 +1047,9 @@ export const fileService = {
         },
       });
 
-    return adjustedFile ? toPlainObject(adjustedFile) : null;
+    if (!adjustedFile) return null;
+    const [withFinancials] = await attachFinancials([toPlainObject(adjustedFile)]);
+    return withFinancials;
   },
 
   /**
@@ -862,7 +1067,14 @@ export const fileService = {
       };
     }
 
-    const [stats, statusStats, monthlyStats] = await Promise.all([
+    // downPayment is no longer a raw File field — it's derived from the
+    // Installment ledger, so the grand total/average need their own lookup
+    // rather than a plain $sum on the File collection.
+    const downPaymentCategoryIds = await InstallmentCategory.find({
+      kind: InstallmentCategoryKind.DOWN_PAYMENT,
+    }).distinct('_id');
+
+    const [stats, statusStats, monthlyStats, downPaymentStats] = await Promise.all([
       File.aggregate([
         {
           $match: matchStage,
@@ -883,10 +1095,8 @@ export const fileService = {
             closedFiles: {
               $sum: { $cond: [{ $eq: ['$status', FileStatus.CLOSED] }, 1, 0] },
             },
-            totalAmount: { $sum: '$totalAmount' },
-            totalDownPayment: { $sum: '$downPayment' },
-            averageAmount: { $avg: '$totalAmount' },
-            averageDownPayment: { $avg: '$downPayment' },
+            totalContractPrice: { $sum: '$contractPrice' },
+            averageContractPrice: { $avg: '$contractPrice' },
           },
         },
       ]),
@@ -898,7 +1108,7 @@ export const fileService = {
           $group: {
             _id: '$status',
             count: { $sum: 1 },
-            totalAmount: { $sum: '$totalAmount' },
+            totalContractPrice: { $sum: '$contractPrice' },
           },
         },
       ]),
@@ -913,7 +1123,7 @@ export const fileService = {
               month: { $month: '$bookingDate' },
             },
             count: { $sum: 1 },
-            totalAmount: { $sum: '$totalAmount' },
+            totalContractPrice: { $sum: '$contractPrice' },
           },
         },
         {
@@ -921,6 +1131,42 @@ export const fileService = {
         },
         {
           $limit: 12,
+        },
+      ]),
+      File.aggregate([
+        { $match: matchStage },
+        {
+          $lookup: {
+            from: 'installments',
+            let: { fid: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$fileId', '$$fid'] },
+                      { $in: ['$installmentCategoryId', downPaymentCategoryIds] },
+                      { $eq: ['$isDeleted', false] },
+                    ],
+                  },
+                },
+              },
+              { $group: { _id: null, total: { $sum: '$amountDue' } } },
+            ],
+            as: 'downPaymentLookup',
+          },
+        },
+        {
+          $addFields: {
+            fileDownPayment: { $ifNull: [{ $arrayElemAt: ['$downPaymentLookup.total', 0] }, 0] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalDownPayment: { $sum: '$fileDownPayment' },
+            averageDownPayment: { $avg: '$fileDownPayment' },
+          },
         },
       ]),
     ]);
@@ -956,7 +1202,7 @@ export const fileService = {
         $group: {
           _id: '$project.projName',
           count: { $sum: 1 },
-          totalAmount: { $sum: '$totalAmount' },
+          totalContractPrice: { $sum: '$contractPrice' },
         },
       },
       {
@@ -967,16 +1213,17 @@ export const fileService = {
       },
     ]);
 
-    const baseStats = stats[0] || {
+    const baseStats = {
       totalFiles: 0,
       activeFiles: 0,
       pendingFiles: 0,
       cancelledFiles: 0,
       closedFiles: 0,
-      totalAmount: 0,
-      totalDownPayment: 0,
-      averageAmount: 0,
-      averageDownPayment: 0,
+      totalContractPrice: 0,
+      averageContractPrice: 0,
+      ...(stats[0] || {}),
+      totalDownPayment: downPaymentStats[0]?.totalDownPayment || 0,
+      averageDownPayment: downPaymentStats[0]?.averageDownPayment || 0,
     };
 
     const byStatus: Record<string, number> = {};
@@ -1044,7 +1291,7 @@ export const fileService = {
         {
           $group: {
             _id: null,
-            total: { $sum: '$totalAmount' },
+            total: { $sum: '$contractPrice' },
           },
         },
       ]),
@@ -1066,6 +1313,7 @@ export const fileService = {
         .limit(10)
         .then(docs => docs.map(doc => toPlainObject(doc))),
     ]);
+    const recentFilesWithFinancials = await attachFinancials(recentFiles);
 
     // Get top projects through plots
     const topProjects = await File.aggregate([
@@ -1102,7 +1350,7 @@ export const fileService = {
           _id: '$plot.projectId',
           projectName: { $first: '$project.projName' },
           fileCount: { $sum: 1 },
-          totalAmount: { $sum: '$totalAmount' },
+          totalContractPrice: { $sum: '$contractPrice' },
         },
       },
       {
@@ -1118,12 +1366,12 @@ export const fileService = {
       activeFiles,
       pendingFiles,
       totalRevenue: totalRevenue[0]?.total || 0,
-      recentFiles,
+      recentFiles: recentFilesWithFinancials,
       topProjects: topProjects.map(project => ({
         projectId: project._id,
         projectName: project.projectName,
         fileCount: project.fileCount,
-        totalAmount: project.totalAmount,
+        totalContractPrice: project.totalContractPrice,
       })),
     };
   },
@@ -1151,7 +1399,7 @@ export const fileService = {
       .sort({ score: { $meta: 'textScore' } })
       .then(docs => docs.map(doc => toPlainObject(doc)));
 
-    return files;
+    return attachFinancials(files);
   },
 
   /**
@@ -1312,8 +1560,8 @@ export const fileService = {
     {
       status: string;
       count: number;
-      totalAmount: number;
-      averageAmount: number;
+      totalContractPrice: number;
+      averageContractPrice: number;
     }[]
   > {
     const summary = await File.aggregate([
@@ -1327,8 +1575,8 @@ export const fileService = {
         $group: {
           _id: '$status',
           count: { $sum: 1 },
-          totalAmount: { $sum: '$totalAmount' },
-          averageAmount: { $avg: '$totalAmount' },
+          totalContractPrice: { $sum: '$contractPrice' },
+          averageContractPrice: { $avg: '$contractPrice' },
         },
       },
       {
@@ -1339,8 +1587,8 @@ export const fileService = {
     return summary.map(item => ({
       status: item._id,
       count: item.count,
-      totalAmount: item.totalAmount,
-      averageAmount: item.averageAmount,
+      totalContractPrice: item.totalContractPrice,
+      averageContractPrice: item.averageContractPrice,
     }));
   },
 };

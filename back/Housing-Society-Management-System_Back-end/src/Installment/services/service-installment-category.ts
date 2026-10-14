@@ -94,6 +94,7 @@ export const installmentCategoryService = {
       page = 1,
       limit = 20,
       search,
+      kind,
       isRefundable,
       isMandatory,
       isActive = true,
@@ -111,6 +112,10 @@ export const installmentCategoryService = {
 
     if (isActive !== undefined) {
       query.isActive = isActive;
+    }
+
+    if (kind) {
+      query.kind = kind;
     }
 
     if (isRefundable !== undefined) {
@@ -336,6 +341,7 @@ export const installmentCategoryService = {
       id: string;
       name: string;
       description?: string;
+      kind: string;
       isMandatory: boolean;
       isRefundable: boolean;
       sequenceOrder: number;
@@ -348,12 +354,13 @@ export const installmentCategoryService = {
 
     const categories = await InstallmentCategory.find(query)
       .sort({ sequenceOrder: 1 })
-      .select('instCatName instCatDescription isMandatory isRefundable sequenceOrder');
+      .select('instCatName instCatDescription kind isMandatory isRefundable sequenceOrder');
 
     return categories.map(category => ({
       id: category._id.toString(),
       name: category.instCatName,
       description: category.instCatDescription,
+      kind: category.kind,
       isMandatory: category.isMandatory,
       isRefundable: category.isRefundable,
       sequenceOrder: category.sequenceOrder,

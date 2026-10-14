@@ -27,13 +27,10 @@ export const installmentController = {
 
       const createData: CreateInstallmentDto = req.body;
 
-      // Validate required fields
-      if (!createData.memId) {
-        throw new AppError(400, 'Member ID is required');
-      }
-
-      if (!createData.plotId) {
-        throw new AppError(400, 'Plot ID is required');
+      // Validate required fields. fileId is the only link now — member/plot
+      // are read through it in the service, never taken as separate input.
+      if (!createData.fileId) {
+        throw new AppError(400, 'File ID is required');
       }
 
       if (!createData.installmentCategoryId) {
@@ -83,17 +80,9 @@ export const installmentController = {
 
       const bulkData: BulkInstallmentCreationDto = req.body;
 
-      // Validate required fields
+      // Validate required fields. fileId is the only link now.
       if (!bulkData.fileId) {
         throw new AppError(400, 'File ID is required');
-      }
-
-      if (!bulkData.memId) {
-        throw new AppError(400, 'Member ID is required');
-      }
-
-      if (!bulkData.plotId) {
-        throw new AppError(400, 'Plot ID is required');
       }
 
       if (!bulkData.installmentCategoryId) {

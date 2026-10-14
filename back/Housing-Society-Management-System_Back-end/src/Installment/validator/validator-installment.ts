@@ -2,22 +2,13 @@ import { body, query, ValidationChain } from 'express-validator';
 import { InstallmentStatus, InstallmentType, PaymentMode } from '../models/models-installment';
 
 export const validateCreateInstallment = (): ValidationChain[] => [
+  // fileId is the only link now — member/plot are read through it in the
+  // service, never accepted as independent client input.
   body('fileId')
-    .optional()
+    .notEmpty()
+    .withMessage('File ID is required')
     .isMongoId()
     .withMessage('Invalid File ID'),
-
-  body('memId')
-    .notEmpty()
-    .withMessage('Member ID is required')
-    .isMongoId()
-    .withMessage('Invalid Member ID'),
-
-  body('plotId')
-    .notEmpty()
-    .withMessage('Plot ID is required')
-    .isMongoId()
-    .withMessage('Invalid Plot ID'),
 
   body('installmentCategoryId')
     .notEmpty()
@@ -74,18 +65,6 @@ export const validateBulkInstallments = (): ValidationChain[] => [
     .withMessage('File ID is required')
     .isMongoId()
     .withMessage('Invalid File ID'),
-
-  body('memId')
-    .notEmpty()
-    .withMessage('Member ID is required')
-    .isMongoId()
-    .withMessage('Invalid Member ID'),
-
-  body('plotId')
-    .notEmpty()
-    .withMessage('Plot ID is required')
-    .isMongoId()
-    .withMessage('Invalid Plot ID'),
 
   body('installmentCategoryId')
     .notEmpty()

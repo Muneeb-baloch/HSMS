@@ -106,8 +106,7 @@ export default function EditFilePage () {
       typeof file.plotId === 'object'
         ? (file.plotId as { _id?: string })?._id
         : file.plotId ?? '',
-    totalAmount: file.totalAmount,
-    downPayment: file.downPayment,
+    // contractPrice/downPayment are server-derived, not editable here.
     paymentMode: file.paymentMode || '',
     isAdjusted: file.isAdjusted,
     adjustmentRef: file.adjustmentRef || '',
@@ -130,8 +129,6 @@ export default function EditFilePage () {
         planId: data.planId as string | undefined,
         nomineeId: (data.nomineeId as string) || undefined,
         plotId: data.plotId as string | undefined,
-        totalAmount: data.totalAmount as number | undefined,
-        downPayment: data.downPayment as number | undefined,
         paymentMode: data.paymentMode as string | undefined,
         isAdjusted: data.isAdjusted as boolean | undefined,
         adjustmentRef: data.adjustmentRef as string | undefined,

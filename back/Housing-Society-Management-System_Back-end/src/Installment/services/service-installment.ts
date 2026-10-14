@@ -4,7 +4,13 @@ import Member from '../../Member/models/models-member';
 
 import Plot from '../../Plots/models/models-plot';
 import { InstallmentCategory } from '../index-installment-category';
-import Installment, { InstallmentStatus, InstallmentType } from '../models/models-installment';
+import { InstallmentCategoryKind } from '../models/models-installment-category';
+import Installment, {
+  flattenFileMemberPlot,
+  InstallmentStatus,
+  InstallmentType,
+  populateFileMemberPlot,
+} from '../models/models-installment';
 import InstallmentPlan from '../models/models-installment-plan';
 import InstallmentPlanDetail from '../models/models-installment-plan-detail';
 import {
@@ -31,6 +37,12 @@ const toPlainObject = (doc: any): InstallmentInterface => {
   if (!plainObj.updatedAt && doc.updatedAt) {
     plainObj.updatedAt = doc.updatedAt;
   }
+
+  // member/plot no longer exist as real fields on Installment — when the
+  // query populated them via populateFileMemberPlot() (nested under file),
+  // flatten them back onto the top level so existing callers reading
+  // installment.member/installment.plot directly keep working.
+  flattenFileMemberPlot(plainObj);
 
   return plainObj as InstallmentInterface;
 };
@@ -61,17 +73,107 @@ const calculateNextDueDate = (
   return date;
 };
 
-// Helper function to map a free-text installment category name to the
-// legacy InstallmentType enum (categories are admin-defined free text,
-// but installmentType is still validated against this fixed enum).
-const mapCategoryToInstallmentType = (categoryName: string): string => {
-  const normalized = categoryName.toLowerCase();
-  const match = Object.values(InstallmentType).find(
-    type =>
-      normalized.includes(type.toLowerCase()) || type.toLowerCase().includes(normalized)
-  );
-  return match || InstallmentType.OTHER;
+// Deterministic mapping from InstallmentCategory.kind to the legacy
+// InstallmentType enum tagged on each generated Installment row. Replaces the
+// old fuzzy categoryName.includes(...) matcher now that kind exists.
+const INSTALLMENT_TYPE_BY_KIND: Record<string, string> = {
+  [InstallmentCategoryKind.DOWN_PAYMENT]: InstallmentType.DOWN_PAYMENT,
+  [InstallmentCategoryKind.INSTALLMENT]: InstallmentType.MONTHLY,
+  [InstallmentCategoryKind.POSSESSION_FEE]: InstallmentType.POSSESSION_FEE,
+  [InstallmentCategoryKind.LEGAL_FEE]: InstallmentType.LEGAL_FEE,
+  [InstallmentCategoryKind.OTHER]: InstallmentType.OTHER,
 };
+
+// kinds whose amounts must reconcile to File.contractPrice (down payment +
+// financed installments). possession_fee/legal_fee/other are real charges
+// that still get generated and tracked, just not part of that sum.
+const RECONCILED_KINDS = new Set<string>([
+  InstallmentCategoryKind.DOWN_PAYMENT,
+  InstallmentCategoryKind.INSTALLMENT,
+]);
+
+export interface GeneratedInstallmentRow {
+  installmentCategoryId: Types.ObjectId;
+  installmentNo: number;
+  installmentTitle: string;
+  installmentType: string;
+  dueDate: Date;
+  amountDue: number;
+  lateFeeSurcharge: number;
+  totalPayable: number;
+  amountPaid: number;
+  balanceAmount: number;
+  status: string;
+}
+
+/**
+ * Single source of truth for turning an InstallmentPlan's detail rows into
+ * real Installment ledger rows. Used by every generator (atomic booking,
+ * the manual "generate from plan" action, and the cron backfill) so the
+ * basis amount and category tagging can never diverge between them again.
+ *
+ * `planDetails` must have `instCatId` populated with at least
+ * `instCatName kind`.
+ */
+export function buildInstallmentRows(params: {
+  contractPrice: number;
+  startDate: Date;
+  planDetails: Array<InstanceType<typeof InstallmentPlanDetail>>;
+}): { rows: GeneratedInstallmentRow[]; reconciledTotal: number } {
+  const { contractPrice, startDate, planDetails } = params;
+  const rows: GeneratedInstallmentRow[] = [];
+  let reconciledTotal = 0;
+
+  for (const detail of planDetails) {
+    const category = detail.instCatId as any;
+    const categoryName: string = category?.instCatName || 'Installment';
+    const kind: string = category?.kind || InstallmentCategoryKind.OTHER;
+
+    // Transfer fees are owned by the Transfer module (TransferType.transferFee /
+    // Transfer.transferFeeAmount, with its own paid-status tracking) — if a plan
+    // detail is wired to a transfer-fee-named category, generating it here would
+    // double-charge the file through two unrelated paths. Fail loud so the admin
+    // fixes the plan config instead of silently skipping it.
+    if (/transfer/i.test(categoryName)) {
+      throw new Error(
+        `Installment plan detail uses category "${categoryName}", which looks like a transfer fee. ` +
+          'Transfer fees are owned by the Transfer module and must not be part of an installment ' +
+          'plan — remove this category from the plan before generating installments.'
+      );
+    }
+
+    const amountDue =
+      detail.fixedAmount > 0
+        ? detail.fixedAmount
+        : Math.round((detail.percentageAmount / 100) * contractPrice * 100) / 100;
+
+    const dueDate = calculateNextDueDate(startDate, 'monthly', detail.occurrence);
+    const installmentType = INSTALLMENT_TYPE_BY_KIND[kind] || InstallmentType.OTHER;
+
+    if (RECONCILED_KINDS.has(kind)) {
+      reconciledTotal += amountDue;
+    }
+
+    rows.push({
+      installmentCategoryId: category?._id ?? detail.instCatId,
+      installmentNo: detail.occurrence,
+      installmentTitle: `${categoryName} - #${detail.occurrence}`,
+      installmentType,
+      dueDate,
+      amountDue,
+      lateFeeSurcharge: 0,
+      totalPayable: amountDue,
+      amountPaid: 0,
+      balanceAmount: amountDue,
+      status: InstallmentStatus.UNPAID,
+    });
+  }
+
+  return { rows, reconciledTotal: Math.round(reconciledTotal * 100) / 100 };
+}
+
+// Reconciliation tolerance for floating-point rounding across many rows.
+export const RECONCILIATION_TOLERANCE = 0.01;
 
 export const installmentService = {
   /**
@@ -84,41 +186,23 @@ export const installmentService = {
     data: CreateInstallmentDto,
     userId: Types.ObjectId
   ): Promise<InstallmentInterface> {
-    // Check if file exists (only if fileId is provided)
-    let file = null;
-    if (data.fileId) {
-      file = await File.findById(data.fileId);
-      if (!file || file.isDeleted) {
-        throw new Error('File not found');
-      }
+    // fileId is the only link now — member/plot are read through it, never
+    // accepted as independent client input (that's exactly how they used to
+    // go stale after a transfer).
+    const file = await File.findById(data.fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
     }
 
-    // Check if member exists
-    const member = await Member.findById(data.memId);
+    const member = await Member.findById(file.memId);
     if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
-    }
-
-    // Check if plot exists
-    const plot = await Plot.findById(data.plotId);
-    if (!plot || plot.isDeleted) {
-      throw new Error('Plot not found');
-    }
-
-    // Check if file's plotId matches the selected plot (only if file exists)
-    if (file && file.plotId.toString() !== data.plotId) {
-      throw new Error('Plot does not belong to the specified file');
+      throw new Error('File has no valid member');
     }
 
     // Check if installment category exists
     const installmentCategory = await InstallmentCategory.findById(data.installmentCategoryId);
     if (!installmentCategory || !installmentCategory.isActive) {
       throw new Error('Installment category not found');
-    }
-
-    // Check if file belongs to member (only if file exists)
-    if (file && file.memId.toString() !== data.memId) {
-      throw new Error('File does not belong to the specified member');
     }
 
     // Check for duplicate installment number for same file and category
@@ -148,12 +232,12 @@ export const installmentService = {
 
     const installment = await Installment.create(installmentData);
 
-    const createdInstallment = await Installment.findById(installment._id)
-      .populate('file', 'fileRegNo')
-      .populate('member', 'memName memNic')
-      .populate('plot', 'plotNo plotSize')
-      .populate('installmentCategory', 'instCatName instCatDescription')
-      .populate('createdBy', 'userName fullName designation');
+    const createdInstallment = await populateFileMemberPlot(
+      Installment.findById(installment._id).populate(
+        'installmentCategory',
+        'instCatName instCatDescription'
+      )
+    ).populate('createdBy', 'userName fullName designation');
 
     if (!createdInstallment) {
       throw new Error('Failed to create installment');
@@ -172,38 +256,22 @@ export const installmentService = {
     data: BulkInstallmentCreationDto,
     userId: Types.ObjectId
   ): Promise<InstallmentInterface[]> {
-    // Check if file exists
+    // fileId is the only link — member/plot are read through it, never taken
+    // as separate client input.
     const file = await File.findById(data.fileId);
     if (!file || file.isDeleted) {
       throw new Error('File not found');
     }
 
-    // Check if member exists
-    const member = await Member.findById(data.memId);
+    const member = await Member.findById(file.memId);
     if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
-    }
-
-    // Check if plot exists
-    const plot = await Plot.findById(data.plotId);
-    if (!plot || plot.isDeleted) {
-      throw new Error('Plot not found');
-    }
-
-    // Check if file's plotId matches the selected plot (File.plotId is source of truth)
-    if (file.plotId.toString() !== data.plotId) {
-      throw new Error('Plot does not belong to the specified file');
+      throw new Error('File has no valid member');
     }
 
     // Check if installment category exists
     const installmentCategory = await InstallmentCategory.findById(data.installmentCategoryId);
     if (!installmentCategory || !installmentCategory.isActive) {
       throw new Error('Installment category not found');
-    }
-
-    // Check if file belongs to member
-    if (file.memId.toString() !== data.memId) {
-      throw new Error('File does not belong to the specified member');
     }
 
     const installments: any[] = [];
@@ -213,8 +281,6 @@ export const installmentService = {
 
       installments.push({
         fileId: data.fileId,
-        memId: data.memId,
-        plotId: data.plotId,
         installmentCategoryId: data.installmentCategoryId,
         installmentNo: i,
         installmentTitle:
@@ -228,6 +294,7 @@ export const installmentService = {
         balanceAmount: data.amountPerInstallment,
         status: InstallmentStatus.UNPAID,
         isDeleted: false,
+        societyId: file.societyId,
         createdBy: userId,
       });
     }
@@ -236,22 +303,25 @@ export const installmentService = {
 
     // Fetch created installments with populated data
     const installmentIds = createdInstallments.map(inst => inst._id);
-    const populatedInstallments = await Installment.find({ _id: { $in: installmentIds } })
-      .populate('file', 'fileRegNo')
-      .populate('member', 'memName memNic')
-      .populate('plot', 'plotNo plotSize')
-      .populate('installmentCategory', 'instCatName instCatDescription')
-      .populate('createdBy', 'userName fullName designation');
+    const populatedInstallments = await populateFileMemberPlot(
+      Installment.find({ _id: { $in: installmentIds } }).populate(
+        'installmentCategory',
+        'instCatName instCatDescription'
+      )
+    ).populate('createdBy', 'userName fullName designation');
 
     return populatedInstallments.map(doc => toPlainObject(doc));
   },
 
   /**
    * Generate the full installment schedule for a File from its linked
-   * Installment Plan. Reads the Plan's InstallmentPlanDetail rows
-   * (category + occurrence + percentage/fixed amount), computes each
-   * installment's amount against the Plot's actual total price, and
-   * bulk-creates the real Installment ledger records.
+   * Installment Plan. Reads the Plan's InstallmentPlanDetail rows (category +
+   * occurrence + percentage/fixed amount), computes each installment's amount
+   * against the File's frozen contractPrice snapshot via buildInstallmentRows
+   * (shared with the atomic booking path and the cron backfill), and
+   * bulk-creates the real Installment ledger records. Manual/admin entry
+   * point for files that didn't get their ledger generated at booking time
+   * (e.g. pre-dating this fix) — also doubles as the cron's safety net target.
    */
   async generateInstallmentsFromPlan(
     fileId: string,
@@ -284,58 +354,51 @@ export const installmentService = {
       planId: plan._id,
       isDeleted: false,
     })
-      .populate('instCatId', 'instCatName')
+      .populate('instCatId', 'instCatName kind')
       .sort({ occurrence: 1 });
 
     if (planDetails.length === 0) {
       throw new Error('Selected installment plan has no configured details');
     }
 
-    const basisAmount = plot.plotTotalAmount;
+    // Basis is the file's own contractPrice snapshot (frozen at booking), never
+    // the plot's live plotTotalAmount — a later plot-price edit must not change
+    // what an already-booked file owes. This is also now the same basis the
+    // cron backfill and the atomic booking generator use — one calculator.
     const startDate = file.bookingDate || new Date();
+    const { rows, reconciledTotal } = buildInstallmentRows({
+      contractPrice: file.contractPrice,
+      startDate,
+      planDetails,
+    });
 
-    const installments: any[] = [];
-
-    for (const detail of planDetails) {
-      const category = detail.instCatId as any;
-      const categoryName = category?.instCatName || 'Installment';
-
-      const amountDue =
-        detail.fixedAmount > 0
-          ? detail.fixedAmount
-          : Math.round((detail.percentageAmount / 100) * basisAmount * 100) / 100;
-
-      const dueDate = calculateNextDueDate(startDate, 'monthly', detail.occurrence);
-
-      installments.push({
-        fileId: file._id,
-        memId: file.memId,
-        plotId: file.plotId,
-        installmentCategoryId: detail.instCatId,
-        planId: plan._id,
-        installmentNo: detail.occurrence,
-        installmentTitle: `${categoryName} - #${detail.occurrence}`,
-        installmentType: mapCategoryToInstallmentType(categoryName),
-        dueDate,
-        amountDue,
-        lateFeeSurcharge: 0,
-        totalPayable: amountDue,
-        amountPaid: 0,
-        balanceAmount: amountDue,
-        status: InstallmentStatus.UNPAID,
-        isDeleted: false,
-        createdBy: userId,
-      });
+    if (Math.abs(reconciledTotal - file.contractPrice) > RECONCILIATION_TOLERANCE) {
+      throw new Error(
+        `Plan "${plan.planName}" does not reconcile: down payment + installment rows sum to ` +
+          `${reconciledTotal}, but the file's contract price is ${file.contractPrice}. Fix the ` +
+          'plan\'s percentages/fixed amounts before generating.'
+      );
     }
+
+    const installments = rows.map(row => ({
+      ...row,
+      fileId: file._id,
+      planId: plan._id,
+      societyId: file.societyId,
+      isDeleted: false,
+      createdBy: userId,
+    }));
 
     const createdInstallments = await Installment.insertMany(installments);
 
     const installmentIds = createdInstallments.map(inst => inst._id);
-    const populatedInstallments = await Installment.find({ _id: { $in: installmentIds } })
-      .populate('file', 'fileRegNo')
-      .populate('member', 'memName memNic')
-      .populate('plot', 'plotNo plotSize')
-      .populate('installmentCategory', 'instCatName instCatDescription')
+    const populatedInstallments = await populateFileMemberPlot(
+      Installment.find({ _id: { $in: installmentIds } }).populate(
+        'installmentCategory',
+        'instCatName instCatDescription'
+      ),
+      { fileSelect: 'fileRegNo' }
+    )
       .populate('plan', 'planName')
       .populate('createdBy', 'userName fullName designation')
       .sort({ installmentNo: 1 });
@@ -348,11 +411,17 @@ export const installmentService = {
    */
   async getInstallmentById(id: string): Promise<InstallmentInterface> {
     try {
-      const installment = await Installment.findById(id)
-        .populate('file', 'fileRegNo fileBarCode projId plotId totalAmount')
-        .populate('member', 'memName memNic fatherName mobileNo email address')
-        .populate('plot', 'plotNo plotSize blockNo sectorNo')
-        .populate('installmentCategory', 'instCatName instCatDescription isRefundable')
+      const installment = await populateFileMemberPlot(
+        Installment.findById(id).populate(
+          'installmentCategory',
+          'instCatName instCatDescription isRefundable'
+        ),
+        {
+          fileSelect: 'fileRegNo fileBarCode projId plotId contractPrice',
+          memberSelect: 'memName memNic fatherName mobileNo email address',
+          plotSelect: 'plotNo plotSize blockNo sectorNo',
+        }
+      )
         .populate('createdBy', 'userName fullName designation')
         .populate('modifiedBy', 'userName fullName designation');
 
@@ -402,16 +471,16 @@ export const installmentService = {
     // Build query
     const query: any = { isDeleted: false };
 
+    // memId/plotId no longer live on Installment — resolve to the matching
+    // File ids first, then filter the ledger by fileId.
     if (fileId) {
       query.fileId = new Types.ObjectId(fileId);
-    }
-
-    if (memId) {
-      query.memId = new Types.ObjectId(memId);
-    }
-
-    if (plotId) {
-      query.plotId = new Types.ObjectId(plotId);
+    } else if (memId || plotId) {
+      const fileFilter: any = { isDeleted: false };
+      if (memId) fileFilter.memId = new Types.ObjectId(memId);
+      if (plotId) fileFilter.plotId = new Types.ObjectId(plotId);
+      const matchingFileIds = await File.find(fileFilter).distinct('_id');
+      query.fileId = { $in: matchingFileIds };
     }
 
     if (installmentCategoryId) {
@@ -436,12 +505,16 @@ export const installmentService = {
       if (toDate) query.dueDate.$lte = new Date(toDate);
     }
 
+    // Overdue = due strictly before the start of today (a row due today is not
+    // overdue), consistent with the isOverdue virtual and dashboard buckets.
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
     if (overdue === true) {
-      query.dueDate = { $lt: new Date() };
+      query.dueDate = { $lt: startOfToday };
       query.status = { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] };
     } else if (overdue === false) {
       query.$or = [
-        { dueDate: { $gte: new Date() } },
+        { dueDate: { $gte: startOfToday } },
         { status: { $in: [InstallmentStatus.PAID, InstallmentStatus.CANCELLED] } },
       ];
     }
@@ -452,11 +525,10 @@ export const installmentService = {
     }
 
     const [installments, total] = await Promise.all([
-      Installment.find(query)
-        .populate('file', 'fileRegNo')
-        .populate('member', 'memName memNic')
-        .populate('plot', 'plotNo')
-        .populate('installmentCategory', 'instCatName')
+      populateFileMemberPlot(
+        Installment.find(query).populate('installmentCategory', 'instCatName'),
+        { fileSelect: 'fileRegNo', plotSelect: 'plotNo' }
+      )
         .skip(skip)
         .limit(limit)
         .sort(sort)
@@ -521,7 +593,29 @@ export const installmentService = {
       modifiedBy: userId,
     };
 
-    // Recalculate totals if amount due or late fee is updated
+    // Paid / Partially Paid / Unpaid are DERIVED from amountPaid vs amountDue —
+    // they can never be set directly through update (that's how a row could
+    // show "Paid" with amountPaid 0, or move money without a payment record).
+    // Only the administrative states (Cancelled / Refunded) may be set here;
+    // to collect money, callers must use recordPayment.
+    const paymentDerivedStatuses: string[] = [
+      InstallmentStatus.PAID,
+      InstallmentStatus.PARTIALLY_PAID,
+      InstallmentStatus.UNPAID,
+      InstallmentStatus.OVERDUE,
+    ];
+    if (data.status !== undefined && paymentDerivedStatuses.includes(data.status)) {
+      delete updateObj.status;
+    }
+
+    // amountPaid is not a free-form field either — it only changes via
+    // recordPayment. Ignore any attempt to set it through a generic update.
+    if ('amountPaid' in updateObj) {
+      delete updateObj.amountPaid;
+    }
+
+    // Recalculate totals if amount due or late fee is edited, and re-derive the
+    // payment status against the (unchanged) amountPaid so it stays consistent.
     if (data.amountDue !== undefined || data.lateFeeSurcharge !== undefined) {
       const amountDue =
         data.amountDue !== undefined ? data.amountDue : existingInstallment.amountDue;
@@ -529,45 +623,32 @@ export const installmentService = {
         data.lateFeeSurcharge !== undefined
           ? data.lateFeeSurcharge
           : existingInstallment.lateFeeSurcharge || 0;
+      const paid = existingInstallment.amountPaid;
 
       updateObj.totalPayable = amountDue + lateFeeSurcharge;
-      updateObj.balanceAmount = updateObj.totalPayable - existingInstallment.amountPaid;
-    }
+      updateObj.balanceAmount = Math.max(0, updateObj.totalPayable - paid);
 
-    // Update status if amount paid is being updated
-    if (data.amountPaid !== undefined) {
-      const totalPayable = updateObj.totalPayable || existingInstallment.totalPayable;
-      if (data.amountPaid >= totalPayable) {
-        updateObj.status = InstallmentStatus.PAID;
-        updateObj.balanceAmount = 0;
-        if (!updateObj.paidDate) {
-          updateObj.paidDate = new Date();
+      if (
+        existingInstallment.status !== InstallmentStatus.CANCELLED &&
+        existingInstallment.status !== InstallmentStatus.REFUNDED
+      ) {
+        if (paid >= updateObj.totalPayable) {
+          updateObj.status = InstallmentStatus.PAID;
+        } else if (paid > 0) {
+          updateObj.status = InstallmentStatus.PARTIALLY_PAID;
+        } else {
+          updateObj.status = InstallmentStatus.UNPAID;
         }
-      } else if (data.amountPaid > 0) {
-        updateObj.status = InstallmentStatus.PARTIALLY_PAID;
-        updateObj.balanceAmount = totalPayable - data.amountPaid;
-      } else {
-        updateObj.status = InstallmentStatus.UNPAID;
-        updateObj.balanceAmount = totalPayable;
       }
     }
 
-    // Set paid date if status changes to PAID
-    if (data.status === InstallmentStatus.PAID && !updateObj.paidDate) {
-      updateObj.paidDate = new Date();
-      updateObj.balanceAmount = 0;
-      updateObj.amountPaid = updateObj.totalPayable || existingInstallment.totalPayable;
-    }
-
-    const installment = await Installment.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true, runValidators: true }
-    )
-      .populate('installmentCategory', 'instCatName')
-      .populate('member', 'memName')
-      .populate('file', 'fileRegNo')
-      .populate('modifiedBy', 'userName fullName');
+    const installment = await populateFileMemberPlot(
+      Installment.findByIdAndUpdate(id, { $set: updateObj }, { new: true, runValidators: true }).populate(
+        'installmentCategory',
+        'instCatName'
+      ),
+      { fileSelect: 'fileRegNo', memberSelect: 'memName' }
+    ).populate('modifiedBy', 'userName fullName');
 
     return installment ? toPlainObject(installment) : null;
   },
@@ -632,10 +713,15 @@ export const installmentService = {
       );
     }
 
+    // paidDate arrives over HTTP/JSON as a string (RecordPaymentDto's `Date`
+    // type is a TS-only lie) — coerce once so both the stored field and the
+    // remark text below can safely call Date methods on it.
+    const paidDate = new Date(data.paidDate);
+
     const updateObj: any = {
       amountPaid: newAmountPaid,
       balanceAmount: totalPayable - newAmountPaid,
-      paidDate: data.paidDate,
+      paidDate,
       paymentMode: data.paymentMode,
       transactionRefNo: data.transactionRefNo,
       modifiedBy: userId,
@@ -650,20 +736,18 @@ export const installmentService = {
     }
 
     // Add payment remarks
-    const paymentRemark = `Payment of Rs. ${data.amountPaid} recorded via ${data.paymentMode} on ${data.paidDate.toLocaleDateString()}${data.transactionRefNo ? ` (Ref: ${data.transactionRefNo})` : ''}${data.remarks ? ` - ${data.remarks}` : ''}`;
+    const paymentRemark = `Payment of Rs. ${data.amountPaid} recorded via ${data.paymentMode} on ${paidDate.toLocaleDateString()}${data.transactionRefNo ? ` (Ref: ${data.transactionRefNo})` : ''}${data.remarks ? ` - ${data.remarks}` : ''}`;
     updateObj.installmentRemarks = installment.installmentRemarks
       ? `${installment.installmentRemarks}\n${paymentRemark}`
       : paymentRemark;
 
-    const updatedInstallment = await Installment.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true }
-    )
-      .populate('installmentCategory', 'instCatName')
-      .populate('member', 'memName')
-      .populate('file', 'fileRegNo')
-      .populate('plot', 'plotNo');
+    const updatedInstallment = await populateFileMemberPlot(
+      Installment.findByIdAndUpdate(id, { $set: updateObj }, { new: true }).populate(
+        'installmentCategory',
+        'instCatName'
+      ),
+      { fileSelect: 'fileRegNo', memberSelect: 'memName', plotSelect: 'plotNo' }
+    );
 
     return updatedInstallment ? toPlainObject(updatedInstallment) : null;
   },
@@ -712,13 +796,15 @@ export const installmentService = {
    * Get installment summary for member
    */
   async getInstallmentSummary(memId: string): Promise<InstallmentSummary> {
+    // memId lives on File now, not Installment — resolve the member's File
+    // ids once and reuse across every pipeline below.
+    const fileIds = await File.find({ memId: new Types.ObjectId(memId) }).distinct('_id');
+    const matchStage = { fileId: { $in: fileIds }, isDeleted: false };
+
     const [summaryStats, statusStats, categoryStats, monthlyStats] = await Promise.all([
       Installment.aggregate([
         {
-          $match: {
-            memId: new Types.ObjectId(memId),
-            isDeleted: false,
-          },
+          $match: matchStage,
         },
         {
           $group: {
@@ -757,10 +843,7 @@ export const installmentService = {
       ]),
       Installment.aggregate([
         {
-          $match: {
-            memId: new Types.ObjectId(memId),
-            isDeleted: false,
-          },
+          $match: matchStage,
         },
         {
           $group: {
@@ -774,10 +857,7 @@ export const installmentService = {
       ]),
       Installment.aggregate([
         {
-          $match: {
-            memId: new Types.ObjectId(memId),
-            isDeleted: false,
-          },
+          $match: matchStage,
         },
         {
           $lookup: {
@@ -801,10 +881,7 @@ export const installmentService = {
       ]),
       Installment.aggregate([
         {
-          $match: {
-            memId: new Types.ObjectId(memId),
-            isDeleted: false,
-          },
+          $match: matchStage,
         },
         {
           $group: {
@@ -969,30 +1046,31 @@ export const installmentService = {
           },
         },
       ]),
-      Installment.find({
-        isDeleted: false,
-        status: InstallmentStatus.PAID,
-      })
-        .populate('member', 'memName')
-        .populate('installmentCategory', 'instCatName')
-        .populate('file', 'fileRegNo')
+      populateFileMemberPlot(
+        Installment.find({
+          isDeleted: false,
+          status: InstallmentStatus.PAID,
+        }).populate('installmentCategory', 'instCatName'),
+        { fileSelect: 'fileRegNo', memberSelect: 'memName' }
+      )
         .sort({ paidDate: -1 })
         .limit(10)
         .then(docs => docs.map(doc => toPlainObject(doc))),
-      Installment.find({
-        isDeleted: false,
-        dueDate: { $gte: today },
-        status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
-      })
-        .populate('member', 'memName')
-        .populate('installmentCategory', 'instCatName')
-        .populate('file', 'fileRegNo')
+      populateFileMemberPlot(
+        Installment.find({
+          isDeleted: false,
+          dueDate: { $gte: today },
+          status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
+        }).populate('installmentCategory', 'instCatName'),
+        { fileSelect: 'fileRegNo', memberSelect: 'memName' }
+      )
         .sort({ dueDate: 1 })
         .limit(10)
         .then(docs => docs.map(doc => toPlainObject(doc))),
     ]);
 
-    // Get top payers
+    // Get top payers — memId lives on File now, so this needs a two-stage
+    // lookup (installment -> file -> member) instead of a direct one.
     const topPayers = await Installment.aggregate([
       {
         $match: {
@@ -1002,8 +1080,19 @@ export const installmentService = {
       },
       {
         $lookup: {
+          from: 'files',
+          localField: 'fileId',
+          foreignField: '_id',
+          as: 'file',
+        },
+      },
+      {
+        $unwind: '$file',
+      },
+      {
+        $lookup: {
           from: 'members',
-          localField: 'memId',
+          localField: 'file.memId',
           foreignField: '_id',
           as: 'member',
         },
@@ -1013,7 +1102,7 @@ export const installmentService = {
       },
       {
         $group: {
-          _id: '$memId',
+          _id: '$file.memId',
           memberName: { $first: '$member.memName' },
           totalPaid: { $sum: '$amountPaid' },
           totalDue: { $sum: '$amountDue' },
@@ -1064,9 +1153,17 @@ export const installmentService = {
       dueDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
     };
 
-    if (fileId) matchQuery.fileId = new Types.ObjectId(fileId);
-    if (memId) matchQuery.memId = new Types.ObjectId(memId);
-    if (plotId) matchQuery.plotId = new Types.ObjectId(plotId);
+    // memId/plotId no longer live on Installment — resolve to matching File
+    // ids first, same pattern as getInstallments.
+    if (fileId) {
+      matchQuery.fileId = new Types.ObjectId(fileId);
+    } else if (memId || plotId) {
+      const fileFilter: any = { isDeleted: false };
+      if (memId) fileFilter.memId = new Types.ObjectId(memId);
+      if (plotId) fileFilter.plotId = new Types.ObjectId(plotId);
+      const matchingFileIds = await File.find(fileFilter).distinct('_id');
+      matchQuery.fileId = { $in: matchingFileIds };
+    }
     if (installmentCategoryId)
       matchQuery.installmentCategoryId = new Types.ObjectId(installmentCategoryId);
     if (status) matchQuery.status = status;
@@ -1086,11 +1183,10 @@ export const installmentService = {
           },
         },
       ]),
-      Installment.find(matchQuery)
-        .populate('file', 'fileRegNo')
-        .populate('member', 'memName memNic')
-        .populate('plot', 'plotNo')
-        .populate('installmentCategory', 'instCatName')
+      populateFileMemberPlot(
+        Installment.find(matchQuery).populate('installmentCategory', 'instCatName'),
+        { fileSelect: 'fileRegNo', plotSelect: 'plotNo' }
+      )
         .sort({ dueDate: 1 })
         .then(docs => docs.map(doc => toPlainObject(doc))),
       Installment.aggregate([
@@ -1181,13 +1277,13 @@ export const installmentService = {
     searchTerm: string,
     limit: number = 10
   ): Promise<InstallmentInterface[]> {
-    const installments = await Installment.find({
-      $text: { $search: searchTerm },
-      isDeleted: false,
-    })
-      .populate('file', 'fileRegNo')
-      .populate('member', 'memName memNic')
-      .populate('installmentCategory', 'instCatName')
+    const installments = await populateFileMemberPlot(
+      Installment.find({
+        $text: { $search: searchTerm },
+        isDeleted: false,
+      }).populate('installmentCategory', 'instCatName'),
+      { fileSelect: 'fileRegNo' }
+    )
       .limit(limit)
       .sort({ score: { $meta: 'textScore' } })
       .then(docs => docs.map(doc => toPlainObject(doc)));
@@ -1203,6 +1299,22 @@ export const installmentService = {
     status: InstallmentStatus,
     userId: Types.ObjectId
   ): Promise<{ matched: number; modified: number }> {
+    // Paid / Partially Paid / Unpaid / Overdue are derived from amountPaid and
+    // must never be bulk-set (the old behaviour set status=Paid with
+    // amountPaid untouched, producing "Paid but Rs 0" rows). Collecting money
+    // is per-row via recordPayment. Only administrative states are allowed here.
+    const allowedBulkStatuses: string[] = [
+      InstallmentStatus.CANCELLED,
+      InstallmentStatus.REFUNDED,
+    ];
+    if (!allowedBulkStatuses.includes(status)) {
+      throw new Error(
+        `Bulk status change to "${status}" is not allowed. Paid/Partial/Unpaid are ` +
+          'derived from recorded payments — use Record Payment on each installment instead. ' +
+          'Bulk updates may only set Cancelled or Refunded.'
+      );
+    }
+
     const objectIds = installmentIds.map(id => {
       try {
         return new Types.ObjectId(id);
@@ -1215,12 +1327,6 @@ export const installmentService = {
       status,
       modifiedBy: userId,
     };
-
-    // Set paid date if status is PAID
-    if (status === InstallmentStatus.PAID) {
-      updateObj.paidDate = new Date();
-      updateObj.balanceAmount = 0;
-    }
 
     // Set cancellation reason if status is CANCELLED
     if (status === InstallmentStatus.CANCELLED) {

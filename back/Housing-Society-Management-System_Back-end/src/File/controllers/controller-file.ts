@@ -30,13 +30,8 @@ export const fileController = {
         throw new AppError(400, 'Member ID is required');
       }
 
-      if (createData.totalAmount === undefined || createData.totalAmount < 0) {
-        throw new AppError(400, 'Valid total amount is required');
-      }
-
-      if (createData.downPayment === undefined || createData.downPayment < 0) {
-        throw new AppError(400, 'Valid down payment is required');
-      }
+      // contractPrice is never client-supplied — fileService.createFile
+      // snapshots it server-side from the plot's price at booking time.
 
       if (!createData.paymentMode) {
         throw new AppError(400, 'Payment mode is required');
@@ -532,14 +527,16 @@ export const fileController = {
     try {
       const fileId = req.params.fileId as string;
 
+      // getFileById already attaches the real ledger-derived downPayment/
+      // balanceAmount/paymentPercentage via fileService.attachFinancials() —
+      // no need (and no longer possible) to re-derive them here.
       const file = await fileService.getFileById(fileId);
 
       const financialSummary = {
-        totalAmount: file.totalAmount,
+        contractPrice: file.contractPrice,
         downPayment: file.downPayment,
-        balanceAmount: file.balanceAmount || file.totalAmount - file.downPayment,
-        paymentPercentage:
-          file.paymentPercentage || Math.round((file.downPayment / file.totalAmount) * 100),
+        balanceAmount: file.balanceAmount,
+        paymentPercentage: file.paymentPercentage,
         paymentMode: file.paymentMode,
         isAdjusted: file.isAdjusted,
         adjustmentRef: file.adjustmentRef,

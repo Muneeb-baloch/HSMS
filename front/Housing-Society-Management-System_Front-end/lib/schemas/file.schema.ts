@@ -47,37 +47,9 @@ export const fileSchema = z
       .min(1, "Plot is required - file must be associated with a plot")
       .regex(/^[0-9a-fA-F]{24}$/, "Invalid plot ID"),
 
-    totalAmount: z.preprocess(
-      (val) => (typeof val === "string" ? val.trim() : val),
-      z
-        .union([z.string(), z.number()])
-        .refine(
-          (val) => {
-            const n = typeof val === "number" ? val : parseFloat(val);
-            return !Number.isNaN(n) && n >= 0;
-          },
-          {
-            message: "Total amount must be a positive number",
-          },
-        )
-        .transform((val) => (typeof val === "number" ? val : parseFloat(val))),
-    ),
-
-    downPayment: z.preprocess(
-      (val) => (typeof val === "string" ? val.trim() : val),
-      z
-        .union([z.string(), z.number()])
-        .refine(
-          (val) => {
-            const n = typeof val === "number" ? val : parseFloat(val);
-            return !Number.isNaN(n) && n >= 0;
-          },
-          {
-            message: "Down payment must be a positive number",
-          },
-        )
-        .transform((val) => (typeof val === "number" ? val : parseFloat(val))),
-    ),
+    // contractPrice is not entered through this form — the server snapshots
+    // it from the plot's price at booking, and the full installment ledger
+    // (including any down payment) is generated atomically at the same time.
 
     paymentMode: z.string().min(1, "Payment mode is required"),
 
@@ -111,10 +83,6 @@ export const fileSchema = z
       })
       .optional()
       .or(z.literal("")),
-  })
-  .refine((data) => data.downPayment <= data.totalAmount, {
-    message: "Down payment cannot exceed total amount",
-    path: ["downPayment"],
   })
   .refine(
     (data) => {
@@ -155,47 +123,7 @@ export const updateFileSchema = z
       .optional()
       .or(z.literal("")),
 
-    totalAmount: z
-      .preprocess(
-        (val) => (typeof val === "string" ? val.trim() : val),
-        z.union([z.string(), z.number()]),
-      )
-      .refine(
-        (val) => {
-          if (val === "" || val === undefined) return true;
-          const n = typeof val === "number" ? val : parseFloat(val);
-          return !Number.isNaN(n) && n >= 0;
-        },
-        {
-          message: "Total amount must be a positive number",
-        },
-      )
-      .optional()
-      .transform((val) => {
-        if (val === "" || val === undefined) return undefined;
-        return typeof val === "number" ? val : parseFloat(val);
-      }),
-
-    downPayment: z
-      .preprocess(
-        (val) => (typeof val === "string" ? val.trim() : val),
-        z.union([z.string(), z.number()]),
-      )
-      .refine(
-        (val) => {
-          if (val === "" || val === undefined) return true;
-          const n = typeof val === "number" ? val : parseFloat(val);
-          return !Number.isNaN(n) && n >= 0;
-        },
-        {
-          message: "Down payment must be a positive number",
-        },
-      )
-      .optional()
-      .transform((val) => {
-        if (val === "" || val === undefined) return undefined;
-        return typeof val === "number" ? val : parseFloat(val);
-      }),
+    // contractPrice/downPayment are server-derived — not editable here.
 
     paymentMode: z.string().optional(),
 
@@ -238,19 +166,7 @@ export const updateFileSchema = z
       .or(z.literal("")),
 
     isActive: z.boolean().optional(),
-  })
-  .refine(
-    (data) => {
-      if (data.downPayment !== undefined && data.totalAmount !== undefined) {
-        return data.downPayment <= data.totalAmount;
-      }
-      return true;
-    },
-    {
-      message: "Down payment cannot exceed total amount",
-      path: ["downPayment"],
-    },
-  );
+  });
 
 export type FileFormData = z.infer<typeof fileSchema>;
 export type UpdateFileFormData = z.infer<typeof updateFileSchema>;

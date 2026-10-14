@@ -116,10 +116,16 @@ export const fileColumns: TableColumn<File>[] = [
     header: 'Amounts',
     cell: row => (
       <div>
-        <div className='font-medium'>{formatCurrency(row.totalAmount)}</div>
-        <div className='text-sm text-gray-500'>
-          Down: {formatCurrency(row.downPayment)}
-        </div>
+        <div className='font-medium'>{formatCurrency(row.contractPrice)}</div>
+        {/* Only show when the plan actually has a down-payment-kind
+            installment row — this is exactly the anomaly this feature was
+            built to fix: a flat "Down: Rs 0" for plans with no such category
+            is as misleading as the old hand-typed number was. */}
+        {!!row.downPayment && (
+          <div className='text-sm text-gray-500'>
+            Down: {formatCurrency(row.downPayment)}
+          </div>
+        )}
         {row.balanceAmount !== undefined && (
           <div className='text-sm text-gray-500'>
             Balance: {formatCurrency(row.balanceAmount)}

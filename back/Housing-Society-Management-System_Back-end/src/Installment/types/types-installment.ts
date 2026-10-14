@@ -3,9 +3,9 @@ import { InstallmentStatus, PaymentMode } from '../models/models-installment';
 
 export interface InstallmentType {
   _id: Types.ObjectId;
+  // fileId is the only authoritative link — member/plot are read through it
+  // (see member?/plot? below), never stored independently anymore.
   fileId: Types.ObjectId;
-  memId: Types.ObjectId;
-  plotId: Types.ObjectId;
   installmentCategoryId: Types.ObjectId;
   planId?: Types.ObjectId;
   installmentNo: number;
@@ -44,8 +44,6 @@ export interface InstallmentType {
 
 export interface CreateInstallmentDto {
   fileId: string;
-  memId: string;
-  plotId: string;
   installmentCategoryId: string;
   installmentNo: number;
   installmentTitle: string;
@@ -154,8 +152,6 @@ export interface InstallmentReport {
 
 export interface BulkInstallmentCreationDto {
   fileId: string;
-  memId: string;
-  plotId: string;
   installmentCategoryId: string;
   installmentType: InstallmentType;
   totalInstallments: number;

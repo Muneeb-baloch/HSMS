@@ -1,4 +1,5 @@
   import { body, query, ValidationChain } from 'express-validator';
+  import { InstallmentCategoryKind } from '../models/models-installment-category';
 
   export const validateCreateCategory = (): ValidationChain[] => [
     body('instCatName')
@@ -13,6 +14,12 @@
       .trim()
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
+
+    body('kind')
+      .notEmpty()
+      .withMessage('Kind is required')
+      .isIn(Object.values(InstallmentCategoryKind))
+      .withMessage(`Kind must be one of: ${Object.values(InstallmentCategoryKind).join(', ')}`),
 
     body('isRefundable').optional().isBoolean().withMessage('Is refundable must be a boolean'),
 
@@ -40,6 +47,11 @@
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
 
+    body('kind')
+      .optional()
+      .isIn(Object.values(InstallmentCategoryKind))
+      .withMessage(`Kind must be one of: ${Object.values(InstallmentCategoryKind).join(', ')}`),
+
     body('isRefundable').optional().isBoolean().withMessage('Is refundable must be a boolean'),
 
     body('isMandatory').optional().isBoolean().withMessage('Is mandatory must be a boolean'),
@@ -66,6 +78,11 @@
       .isLength({ min: 2 })
       .withMessage('Search term must be at least 2 characters'),
 
+    query('kind')
+      .optional()
+      .isIn(Object.values(InstallmentCategoryKind))
+      .withMessage(`Kind must be one of: ${Object.values(InstallmentCategoryKind).join(', ')}`),
+
     query('isRefundable').optional().isBoolean().withMessage('Is refundable must be a boolean'),
 
     query('isMandatory').optional().isBoolean().withMessage('Is mandatory must be a boolean'),
@@ -74,7 +91,7 @@
 
     query('sortBy')
       .optional()
-      .isIn(['instCatName', 'sequenceOrder', 'createdAt', 'updatedAt'])
+      .isIn(['instCatName', 'kind', 'sequenceOrder', 'createdAt', 'updatedAt'])
       .withMessage('Invalid sort field'),
 
     query('sortOrder')

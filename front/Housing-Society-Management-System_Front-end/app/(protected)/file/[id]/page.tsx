@@ -161,7 +161,8 @@ export default function ViewFilePage () {
                       </div>
                       {file.plan && (
                         <div className='text-sm text-gray-600'>
-                          {file.plan.totalMonths} months · {file.plan.totalAmount?.toLocaleString?.()} PKR
+                          {file.plan.totalMonths} months · Contract price{' '}
+                          {formatCurrency(file.contractPrice)}
                         </div>
                       )}
                     </div>
@@ -241,31 +242,62 @@ export default function ViewFilePage () {
                 </div>
                 <div className='grid grid-cols-1 md:grid-cols-2 gap-4 pl-6'>
                   <div>
-                    <div className='text-sm text-gray-600'>Total Amount</div>
+                    <div className='text-sm text-gray-600'>Contract Price</div>
                     <div className='font-medium text-lg'>
-                      {formatCurrency(file.totalAmount)}
+                      {formatCurrency(file.contractPrice)}
                     </div>
                   </div>
+                  {/* Only shown when the plan actually has a down-payment
+                      category — this is the exact anomaly the fix addresses:
+                      a plan with no down payment component shouldn't show one.
+                      The badge reflects how much of the down-payment row has
+                      actually been collected (driven by its amountPaid). */}
+                  {!!file.downPayment && (
+                    <div>
+                      <div className='text-sm text-gray-600'>Down Payment</div>
+                      <div className='font-medium flex items-center gap-2'>
+                        {formatCurrency(file.downPayment)}
+                        {file.downPaymentStatus === 'paid' && (
+                          <Badge className='bg-green-100 text-green-800'>Paid</Badge>
+                        )}
+                        {file.downPaymentStatus === 'partial' && (
+                          <Badge className='bg-blue-100 text-blue-800'>
+                            Partial ({formatCurrency(file.downPaymentPaid)})
+                          </Badge>
+                        )}
+                        {file.downPaymentStatus === 'unpaid' && (
+                          <Badge className='bg-yellow-100 text-yellow-800'>Unpaid</Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <div className='text-sm text-gray-600'>Down Payment</div>
+                    <div className='text-sm text-gray-600'>Plot Balance</div>
                     <div className='font-medium'>
-                      {formatCurrency(file.downPayment)}
+                      {formatCurrency(file.plotBalance ?? file.balanceAmount)}
                     </div>
                   </div>
-                  <div>
-                    <div className='text-sm text-gray-600'>Balance Amount</div>
-                    <div className='font-medium'>
-                      {formatCurrency(
-                        file.balanceAmount ||
-                          file.totalAmount - file.downPayment
-                      )}
-                    </div>
-                  </div>
+                  {/* Only shown when it differs from the plot balance — i.e. the
+                      file has possession/legal/other fee rows on the ledger.
+                      These are real charges but not part of the plot price, so
+                      paying one must not move Plot Balance (see totalOutstanding
+                      vs plotBalance split in attachFinancials). */}
+                  {file.totalOutstanding !== undefined &&
+                    file.totalOutstanding !== (file.plotBalance ?? file.balanceAmount) && (
+                      <div>
+                        <div className='text-sm text-gray-600'>
+                          Total Outstanding (incl. fees)
+                        </div>
+                        <div className='font-medium'>
+                          {formatCurrency(file.totalOutstanding)}
+                        </div>
+                      </div>
+                    )}
                   <div>
                     <div className='text-sm text-gray-600'>Payment Mode</div>
                     <div className='font-medium'>{file.paymentMode}</div>
                   </div>
-                  {file.paymentPercentage && (
+                  {!!file.paymentPercentage && (
                     <div>
                       <div className='text-sm text-gray-600'>
                         Payment Percentage
@@ -726,24 +758,23 @@ export default function ViewFilePage () {
                     </Badge>
                   </li>
                   <li className='flex justify-between'>
-                    <span>Total Amount:</span>
+                    <span>Contract Price:</span>
                     <span className='font-medium'>
-                      {formatCurrency(file.totalAmount)}
+                      {formatCurrency(file.contractPrice)}
                     </span>
                   </li>
-                  <li className='flex justify-between'>
-                    <span>Down Payment:</span>
-                    <span className='font-medium'>
-                      {formatCurrency(file.downPayment)}
-                    </span>
-                  </li>
+                  {!!file.downPayment && (
+                    <li className='flex justify-between'>
+                      <span>Down Payment:</span>
+                      <span className='font-medium'>
+                        {formatCurrency(file.downPayment)}
+                      </span>
+                    </li>
+                  )}
                   <li className='flex justify-between'>
                     <span>Balance:</span>
                     <span className='font-medium'>
-                      {formatCurrency(
-                        file.balanceAmount ||
-                          file.totalAmount - file.downPayment
-                      )}
+                      {formatCurrency(file.balanceAmount)}
                     </span>
                   </li>
                   <li className='flex justify-between'>

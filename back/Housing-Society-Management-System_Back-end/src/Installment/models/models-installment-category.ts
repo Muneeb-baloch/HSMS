@@ -1,8 +1,21 @@
 import { Document, Model, Schema, Types, model } from 'mongoose';
 
+// Deterministic classification used by the installment generator to compute
+// File.contractPrice reconciliation (down_payment + installment rows must sum
+// to contractPrice) and to tag generated Installment.installmentType — replaces
+// fragile instCatName string-matching.
+export enum InstallmentCategoryKind {
+  DOWN_PAYMENT = 'down_payment',
+  INSTALLMENT = 'installment',
+  POSSESSION_FEE = 'possession_fee',
+  LEGAL_FEE = 'legal_fee',
+  OTHER = 'other',
+}
+
 export interface IInstallmentCategory extends Document {
   instCatName: string;
   instCatDescription?: string;
+  kind: string;
   societyId?: Types.ObjectId;
   isRefundable: boolean;
   isMandatory: boolean;
@@ -28,6 +41,16 @@ const installmentCategorySchema = new Schema<IInstallmentCategory>(
       type: String,
       trim: true,
       maxlength: [500, 'Description cannot exceed 500 characters'],
+    },
+    kind: {
+      type: String,
+      enum: {
+        values: Object.values(InstallmentCategoryKind),
+        message: '{VALUE} is not a valid installment category kind',
+      },
+      required: [true, 'Kind is required'],
+      default: InstallmentCategoryKind.OTHER,
+      index: true,
     },
     societyId: {
       type: Schema.Types.ObjectId,
@@ -99,6 +122,7 @@ const installmentCategorySchema = new Schema<IInstallmentCategory>(
 
 // Compound indexes for efficient querying
 installmentCategorySchema.index({ societyId: 1, isActive: 1 });
+installmentCategorySchema.index({ kind: 1, isActive: 1 });
 installmentCategorySchema.index({ isActive: 1, sequenceOrder: 1 });
 installmentCategorySchema.index({ isMandatory: 1, isActive: 1 });
 installmentCategorySchema.index({ isRefundable: 1, isActive: 1 });

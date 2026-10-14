@@ -1,9 +1,11 @@
 import { Types } from 'mongoose';
+import { InstallmentCategoryKind } from '../models/models-installment-category';
 
 export interface InstallmentCategoryType {
   _id: Types.ObjectId;
   instCatName: string;
   instCatDescription?: string;
+  kind: string;
   isRefundable: boolean;
   isMandatory: boolean;
   sequenceOrder: number;
@@ -21,6 +23,7 @@ export interface InstallmentCategoryType {
 export interface CreateInstallmentCategoryDto {
   instCatName: string;
   instCatDescription?: string;
+  kind: InstallmentCategoryKind;
   isRefundable?: boolean;
   isMandatory?: boolean;
   sequenceOrder: number;
@@ -30,6 +33,7 @@ export interface CreateInstallmentCategoryDto {
 export interface UpdateInstallmentCategoryDto {
   instCatName?: string;
   instCatDescription?: string;
+  kind?: InstallmentCategoryKind;
   isRefundable?: boolean;
   isMandatory?: boolean;
   sequenceOrder?: number;
@@ -40,6 +44,7 @@ export interface InstallmentCategoryQueryParams {
   page?: number;
   limit?: number;
   search?: string;
+  kind?: InstallmentCategoryKind;
   isRefundable?: boolean;
   isMandatory?: boolean;
   isActive?: boolean;
@@ -61,10 +66,17 @@ export interface InstallmentCategorySummary {
 }
 
 // Default categories for seeding
+// NOTE: 'Transfer Fee' is intentionally kept as kind 'other', not a dedicated
+// kind — the Transfer module (TransferType.transferFee / Transfer.transferFeeAmount)
+// is the sole owner of that money. The installment generator rejects any plan
+// detail wired to a transfer-fee-named category rather than silently billing it
+// twice; this seed entry exists for societies that want to list it for reference,
+// it must never actually be attached to an InstallmentPlan.
 export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Down Payment',
     instCatDescription: 'Initial payment made when booking a property',
+    kind: InstallmentCategoryKind.DOWN_PAYMENT,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 1,
@@ -72,6 +84,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Monthly Installment',
     instCatDescription: 'Regular monthly payment',
+    kind: InstallmentCategoryKind.INSTALLMENT,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 2,
@@ -79,6 +92,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Quarterly Balloon',
     instCatDescription: 'Quarterly lump sum payment',
+    kind: InstallmentCategoryKind.INSTALLMENT,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 3,
@@ -86,6 +100,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Possession Fee',
     instCatDescription: 'Fee charged at the time of possession',
+    kind: InstallmentCategoryKind.POSSESSION_FEE,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 4,
@@ -93,6 +108,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Balloting Fee',
     instCatDescription: 'Fee for participating in balloting process',
+    kind: InstallmentCategoryKind.OTHER,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 5,
@@ -100,6 +116,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Utility Connection Charges',
     instCatDescription: 'Charges for water, electricity, gas connections',
+    kind: InstallmentCategoryKind.OTHER,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 6,
@@ -107,6 +124,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Security Deposit',
     instCatDescription: 'Refundable deposit for utilities',
+    kind: InstallmentCategoryKind.OTHER,
     isRefundable: true,
     isMandatory: true,
     sequenceOrder: 7,
@@ -114,6 +132,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Development Charges',
     instCatDescription: 'Charges for infrastructure development',
+    kind: InstallmentCategoryKind.OTHER,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 8,
@@ -121,6 +140,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Legal Fee',
     instCatDescription: 'Legal documentation and processing fee',
+    kind: InstallmentCategoryKind.LEGAL_FEE,
     isRefundable: false,
     isMandatory: true,
     sequenceOrder: 9,
@@ -128,6 +148,7 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
   {
     instCatName: 'Transfer Fee',
     instCatDescription: 'Fee for property transfer',
+    kind: InstallmentCategoryKind.OTHER,
     isRefundable: false,
     isMandatory: false,
     sequenceOrder: 10,

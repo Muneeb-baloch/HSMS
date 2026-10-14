@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import File from '../../File/models/models-file';
 import Project from '../../Project/models/models-project';
 import InstallmentPlan from '../models/models-installment-plan';
 import {
@@ -133,6 +134,19 @@ export const installmentPlanService = {
   async deleteInstallmentPlan(id: string, userId: Types.ObjectId): Promise<boolean> {
     const existing = await InstallmentPlan.findOne({ _id: id, isDeleted: false });
     if (!existing) throw new Error('Installment plan not found');
+
+    // A File's planId is permanent once booked (its own contractPrice/ledger
+    // is already generated and frozen) — but deleting the plan out from under
+    // it would still orphan the reference and break admin flows that look the
+    // plan back up (e.g. regenerating installments for a file that doesn't
+    // have its ledger yet). Block deletion while any file still points at it.
+    const filesUsingPlan = await File.countDocuments({ planId: id, isDeleted: false });
+    if (filesUsingPlan > 0) {
+      throw new Error(
+        `Cannot delete this plan — it is used by ${filesUsingPlan} file(s). ` +
+          'Deactivate it instead if you want to stop it being selected for new files.'
+      );
+    }
 
     const result = await InstallmentPlan.findByIdAndUpdate(
       id,

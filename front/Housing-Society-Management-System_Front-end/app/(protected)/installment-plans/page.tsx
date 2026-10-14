@@ -121,6 +121,7 @@ export default function InstallmentPlansPage () {
       onEdit: canUpdate ? handleEdit : undefined,
       onDelete: canDelete ? handleDelete : undefined,
     },
+    enableActions: true,
     enableRowSelection: false,
     enableSorting: true,
     enablePagination: true,

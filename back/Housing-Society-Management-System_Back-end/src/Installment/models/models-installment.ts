@@ -1,4 +1,5 @@
 import { Document, Model, Schema, Types, model } from 'mongoose';
+import File from '../../File/models/models-file';
 
 // @deprecated - use LookupValue collection (category: 'installment_status') instead
 export enum InstallmentStatus {
@@ -39,9 +40,11 @@ export enum PaymentMode {
 }
 
 export interface IInstallment extends Document {
-  fileId?: Types.ObjectId;
-  memId: Types.ObjectId;
-  plotId: Types.ObjectId;
+  // File is the only authoritative link — memId/plotId used to be duplicated
+  // here and never cascaded on ownership transfer, so a sold file's old
+  // installments silently kept pointing at the previous owner. Always read
+  // member/plot through fileId -> File now (see populateFileMemberPlot below).
+  fileId: Types.ObjectId;
   installmentCategoryId: Types.ObjectId;
   planId?: Types.ObjectId;
   installmentNo: number;
@@ -68,6 +71,9 @@ export interface IInstallment extends Document {
 
   // Virtual fields
   file?: any;
+  // member/plot are no longer Mongoose virtuals (no local memId/plotId field
+  // to populate against) — they're attached by populateFileMemberPlot() via
+  // a nested populate through file, then flattened by flattenFileMemberPlot().
   member?: any;
   plot?: any;
   installmentCategory?: any;
@@ -83,18 +89,6 @@ const installmentSchema = new Schema<IInstallment>(
     fileId: {
       type: Schema.Types.ObjectId,
       ref: 'File',
-      required: false,
-      index: true,
-    },
-    memId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Member',
-      required: true,
-      index: true,
-    },
-    plotId: {
-      type: Schema.Types.ObjectId,
-      ref: 'Plot',
       required: true,
       index: true,
     },
@@ -244,8 +238,6 @@ const installmentSchema = new Schema<IInstallment>(
 
 // Compound indexes for efficient querying
 installmentSchema.index({ fileId: 1, installmentNo: 1 });
-installmentSchema.index({ memId: 1, status: 1 });
-installmentSchema.index({ plotId: 1, dueDate: 1 });
 installmentSchema.index({ status: 1, dueDate: 1 });
 installmentSchema.index({ dueDate: 1, isDeleted: 1 });
 installmentSchema.index({ installmentCategoryId: 1, status: 1 });
@@ -276,21 +268,11 @@ installmentSchema.virtual('file', {
   justOne: true,
 });
 
-// Virtual for member
-installmentSchema.virtual('member', {
-  ref: 'Member',
-  localField: 'memId',
-  foreignField: '_id',
-  justOne: true,
-});
-
-// Virtual for plot
-installmentSchema.virtual('plot', {
-  ref: 'Plot',
-  localField: 'plotId',
-  foreignField: '_id',
-  justOne: true,
-});
+// member/plot are intentionally NOT virtual-populate fields anymore — there's
+// no local memId/plotId to match against. Use populateFileMemberPlot() below
+// (nested populate through file) plus flattenFileMemberPlot() on the plain
+// object, so callers that read installment.member/installment.plot keep
+// working without caring that the data now comes from File.
 
 // Virtual for installment category
 installmentSchema.virtual('installmentCategory', {
@@ -324,14 +306,17 @@ installmentSchema.virtual('modifiedByUser', {
   justOne: true,
 });
 
-// Virtual to check if installment is overdue
+// Virtual to check if installment is overdue. "Overdue" = due strictly before
+// the start of today; a row due *today* is NOT overdue (matches the dashboard
+// Due-Today vs Total-Overdue bucketing and the list UI label).
 installmentSchema.virtual('isOverdue').get(function () {
   if (this.status === InstallmentStatus.PAID || this.status === InstallmentStatus.CANCELLED) {
     return false;
   }
 
-  const now = new Date();
-  return this.dueDate < now;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return this.dueDate < startOfToday;
 });
 
 // Virtual for days overdue
@@ -375,6 +360,11 @@ const calculateLateFee = (amountDue: number, daysOverdue: number): number => {
 installmentSchema.pre('save', function (next) {
   const doc = this as any;
 
+  // "Overdue" is measured from the start of today — a row due today is not yet
+  // overdue (consistent with the isOverdue virtual and the dashboard buckets).
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
   // Calculate total payable
   doc.totalPayable = doc.amountDue + (doc.lateFeeSurcharge || 0);
 
@@ -383,7 +373,7 @@ installmentSchema.pre('save', function (next) {
 
   // Auto-update status based on payments
   if (doc.amountPaid === 0) {
-    if (doc.dueDate < new Date() && doc.status !== InstallmentStatus.CANCELLED) {
+    if (doc.dueDate < startOfToday && doc.status !== InstallmentStatus.CANCELLED) {
       doc.status = InstallmentStatus.OVERDUE;
     } else if (doc.status !== InstallmentStatus.CANCELLED) {
       doc.status = InstallmentStatus.UNPAID;
@@ -398,9 +388,9 @@ installmentSchema.pre('save', function (next) {
     doc.status = InstallmentStatus.PARTIALLY_PAID;
   }
 
-  // Calculate late fee if overdue
+  // Calculate late fee only once genuinely overdue (past start of today)
   if (
-    doc.dueDate < new Date() &&
+    doc.dueDate < startOfToday &&
     doc.status !== InstallmentStatus.PAID &&
     doc.status !== InstallmentStatus.CANCELLED
   ) {
@@ -453,6 +443,43 @@ installmentSchema.pre('findOneAndUpdate', function (next) {
   next();
 });
 
+/**
+ * Nests a member/plot populate under file instead of populating them
+ * directly off the Installment document (there's no local memId/plotId to
+ * match against anymore — fileId -> File is the only link). Chain onto any
+ * query that also wants `.populate('installmentCategory', ...)` etc.
+ */
+function populateFileMemberPlot<T extends { populate: (...args: any[]) => any }>(
+  query: T,
+  opts: { fileSelect?: string; memberSelect?: string; plotSelect?: string } = {}
+): T {
+  // File.member / File.plot are virtuals keyed on File.memId / File.plotId, so
+  // those foreign keys MUST be selected on the file or the nested virtuals
+  // can't resolve (member/plot come back empty). Always include them.
+  const fileSelect = `${opts.fileSelect ?? 'fileRegNo'} memId plotId`;
+  return query.populate({
+    path: 'file',
+    select: fileSelect,
+    populate: [
+      { path: 'member', select: opts.memberSelect ?? 'memName memNic' },
+      { path: 'plot', select: opts.plotSelect ?? 'plotNo plotSize' },
+    ],
+  });
+}
+
+/**
+ * Flattens installment.file.member/installment.file.plot back onto
+ * installment.member/installment.plot on a plain object, so existing
+ * callers reading those two fields directly don't need to change.
+ */
+function flattenFileMemberPlot(plainObj: any): any {
+  if (plainObj && plainObj.file) {
+    if (plainObj.file.member !== undefined) plainObj.member = plainObj.file.member;
+    if (plainObj.file.plot !== undefined) plainObj.plot = plainObj.file.plot;
+  }
+  return plainObj;
+}
+
 // Static methods
 interface IInstallmentModel extends Model<IInstallment> {
   findByFile(fileId: string): Promise<IInstallment[]>;
@@ -460,44 +487,44 @@ interface IInstallmentModel extends Model<IInstallment> {
   findByPlot(plotId: string): Promise<IInstallment[]>;
   findOverdue(): Promise<IInstallment[]>;
   findDueToday(): Promise<IInstallment[]>;
-  getInstallmentSummary(memId: string): Promise<any>;
   findNextDue(memId: string): Promise<IInstallment | null>;
 }
 
 // Find by file
 installmentSchema.statics.findByFile = function (fileId: string) {
-  return this.find({
-    fileId: new Types.ObjectId(fileId),
-    isDeleted: false,
-  })
-    .populate('installmentCategory', 'instCatName instCatDescription')
-    .populate('member', 'memName memNic')
-    .populate('plot', 'plotNo plotSize')
-    .sort({ installmentNo: 1 });
+  return populateFileMemberPlot(
+    this.find({
+      fileId: new Types.ObjectId(fileId),
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName instCatDescription')
+  ).sort({ installmentNo: 1 });
 };
 
-// Find by member
-installmentSchema.statics.findByMember = function (memId: string) {
-  return this.find({
-    memId: new Types.ObjectId(memId),
-    isDeleted: false,
-  })
-    .populate('installmentCategory', 'instCatName instCatDescription')
-    .populate('file', 'fileRegNo')
-    .populate('plot', 'plotNo plotSize')
-    .sort({ dueDate: 1 });
+// Find by member — resolve the member's File ids first (memId lives on File
+// now, not here), then match installments by fileId.
+installmentSchema.statics.findByMember = async function (memId: string) {
+  const fileIds = await File.find({ memId: new Types.ObjectId(memId) }).distinct('_id');
+
+  return populateFileMemberPlot(
+    this.find({
+      fileId: { $in: fileIds },
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName instCatDescription'),
+    { fileSelect: 'fileRegNo' }
+  ).sort({ dueDate: 1 });
 };
 
-// Find by plot
-installmentSchema.statics.findByPlot = function (plotId: string) {
-  return this.find({
-    plotId: new Types.ObjectId(plotId),
-    isDeleted: false,
-  })
-    .populate('installmentCategory', 'instCatName instCatDescription')
-    .populate('member', 'memName memNic')
-    .populate('file', 'fileRegNo')
-    .sort({ dueDate: 1 });
+// Find by plot — same pattern as findByMember.
+installmentSchema.statics.findByPlot = async function (plotId: string) {
+  const fileIds = await File.find({ plotId: new Types.ObjectId(plotId) }).distinct('_id');
+
+  return populateFileMemberPlot(
+    this.find({
+      fileId: { $in: fileIds },
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName instCatDescription'),
+    { fileSelect: 'fileRegNo', memberSelect: 'memName memNic' }
+  ).sort({ dueDate: 1 });
 };
 
 // Find overdue installments
@@ -505,16 +532,14 @@ installmentSchema.statics.findOverdue = function () {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  return this.find({
-    dueDate: { $lt: today },
-    status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
-    isDeleted: false,
-  })
-    .populate('member', 'memName memNic mobileNo')
-    .populate('installmentCategory', 'instCatName')
-    .populate('file', 'fileRegNo')
-    .populate('plot', 'plotNo')
-    .sort({ dueDate: 1 });
+  return populateFileMemberPlot(
+    this.find({
+      dueDate: { $lt: today },
+      status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName'),
+    { fileSelect: 'fileRegNo', memberSelect: 'memName memNic mobileNo', plotSelect: 'plotNo' }
+  ).sort({ dueDate: 1 });
 };
 
 // Find installments due today
@@ -524,73 +549,36 @@ installmentSchema.statics.findDueToday = function () {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  return this.find({
-    dueDate: { $gte: today, $lt: tomorrow },
-    status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
-    isDeleted: false,
-  })
-    .populate('member', 'memName memNic mobileNo')
-    .populate('installmentCategory', 'instCatName')
-    .populate('file', 'fileRegNo')
-    .populate('plot', 'plotNo')
-    .sort({ dueDate: 1 });
+  return populateFileMemberPlot(
+    this.find({
+      dueDate: { $gte: today, $lt: tomorrow },
+      status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName'),
+    { fileSelect: 'fileRegNo', memberSelect: 'memName memNic mobileNo', plotSelect: 'plotNo' }
+  ).sort({ dueDate: 1 });
 };
 
-// Get installment summary for member
-installmentSchema.statics.getInstallmentSummary = function (memId: string) {
-  return this.aggregate([
-    {
-      $match: {
-        memId: new Types.ObjectId(memId),
-        isDeleted: false,
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalInstallments: { $sum: 1 },
-        totalAmountDue: { $sum: '$amountDue' },
-        totalAmountPaid: { $sum: '$amountPaid' },
-        totalBalance: { $sum: '$balanceAmount' },
-        totalLateFee: { $sum: '$lateFeeSurcharge' },
-        byStatus: {
-          $push: {
-            status: '$status',
-            amount: '$amountDue',
-            paid: '$amountPaid',
-            balance: '$balanceAmount',
-          },
-        },
-        byCategory: {
-          $push: {
-            categoryId: '$installmentCategoryId',
-            amount: '$amountDue',
-            paid: '$amountPaid',
-          },
-        },
-      },
-    },
-  ]);
-};
-
-// Find next due installment for member
-installmentSchema.statics.findNextDue = function (memId: string) {
+// Find next due installment for member — same File-first resolution as
+// findByMember, then the single next-due row across those files.
+installmentSchema.statics.findNextDue = async function (memId: string) {
+  const fileIds = await File.find({ memId: new Types.ObjectId(memId) }).distinct('_id');
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  return this.findOne({
-    memId: new Types.ObjectId(memId),
-    dueDate: { $gte: today },
-    status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
-    isDeleted: false,
-  })
-    .populate('installmentCategory', 'instCatName instCatDescription')
-    .populate('file', 'fileRegNo')
-    .populate('plot', 'plotNo plotSize')
-    .sort({ dueDate: 1 });
+  return populateFileMemberPlot(
+    this.findOne({
+      fileId: { $in: fileIds },
+      dueDate: { $gte: today },
+      status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
+      isDeleted: false,
+    }).populate('installmentCategory', 'instCatName instCatDescription'),
+    { fileSelect: 'fileRegNo', plotSelect: 'plotNo plotSize' }
+  ).sort({ dueDate: 1 });
 };
 
 // Create and export model
 const Installment = model<IInstallment, IInstallmentModel>('Installment', installmentSchema);
 
+export { populateFileMemberPlot, flattenFileMemberPlot };
 export default Installment;

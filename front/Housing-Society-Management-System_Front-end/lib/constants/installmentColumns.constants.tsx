@@ -42,15 +42,23 @@ export const installmentColumns: TableColumn<Installment>[] = [
     id: 'member',
     header: 'Member',
     cell: row => {
-      const member = typeof row.memId === 'object' ? row.memId : null
-      const file = typeof row.fileId === 'object' ? row.fileId : null
+      // member/plot are read through fileId -> File now (Installment no longer
+      // stores memId/plotId). The API flattens them to row.member / row.plot,
+      // and the file itself (with fileRegNo) is at row.file.
+      const member =
+        row.member && typeof row.member === 'object' ? row.member : null
+      const file =
+        row.file && typeof row.file === 'object'
+          ? row.file
+          : typeof row.fileId === 'object'
+            ? row.fileId
+            : null
 
       return (
         <div>
-          <div className='font-medium'>{member?.memName
- || 'Member'}</div>
+          <div className='font-medium'>{member?.memName || '—'}</div>
           <div className='text-sm text-gray-500'>
-            File: {file?.fileRegNo || 'File'}
+            File: {file?.fileRegNo || '—'}
           </div>
         </div>
       )
@@ -63,10 +71,16 @@ export const installmentColumns: TableColumn<Installment>[] = [
     accessorKey: 'dueDate',
     sortable: true,
     cell: row => {
-      const today = new Date()
+      // "Overdue" means strictly before the start of today — a row due *today*
+      // is not overdue. This matches the dashboard summary cards, which bucket
+      // by start-of-day (Due Today vs Total Overdue).
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
       const dueDate = new Date(row.dueDate)
       const isOverdue =
-        dueDate < today && row.status !== 'Paid' && row.status !== 'Cancelled'
+        dueDate < startOfToday &&
+        row.status !== 'Paid' &&
+        row.status !== 'Cancelled'
 
       return (
         <div className={isOverdue ? 'text-red-600 font-medium' : ''}>

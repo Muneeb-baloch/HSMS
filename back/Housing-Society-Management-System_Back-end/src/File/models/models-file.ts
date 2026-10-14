@@ -36,8 +36,11 @@ export interface IFile extends Document {
   applicationId?: Types.ObjectId;
   plotId: Types.ObjectId; // REQUIRED now
 
-  totalAmount: number;
-  downPayment: number;
+  // The agreed contract price, snapshotted from Plot.plotTotalAmount at the
+  // moment of booking. Never silently recomputed from a later plot-price edit
+  // — only a deliberate revision path should change it (none exists yet).
+  contractPrice: number;
+  priceSnapshotAt: Date;
   paymentMode: string;
   isAdjusted: boolean;
   adjustmentRef?: string;
@@ -65,7 +68,13 @@ export interface IFile extends Document {
   plot?: any;
   createdByUser?: any;
   modifiedByUser?: any;
+  // balanceAmount here is a synchronous, pre-ledger-only fallback (see the
+  // virtual below). The real post-generation balance/downPayment/
+  // paymentPercentage are computed async from the Installment ledger by
+  // fileService.attachFinancials() and merged onto the plain response
+  // object — not true Mongoose virtuals, since they require a DB query.
   balanceAmount?: number;
+  downPayment?: number;
   paymentPercentage?: number;
   fileAge?: number;
   statusBadgeColor?: string;
@@ -112,21 +121,14 @@ const fileSchema = new Schema<IFile>(
       required: true, // REQUIRED
     },
 
-    totalAmount: {
+    contractPrice: {
       type: Number,
       required: true,
       min: 0,
     },
-    downPayment: {
-      type: Number,
+    priceSnapshotAt: {
+      type: Date,
       required: true,
-      min: 0,
-      validate: {
-        validator: function (this: IFile, value: number) {
-          return value <= this.totalAmount;
-        },
-        message: 'Down payment cannot exceed total amount',
-      },
     },
     paymentMode: {
       type: String,
@@ -249,13 +251,13 @@ fileSchema.index(
 );
 
 // ------------------- VIRTUALS -------------------
+// Pre-ledger-only fallback: correct exactly when no Installment row exists
+// yet for this file (amountPaid is necessarily 0, so balance == contractPrice).
+// Once a ledger exists, fileService.attachFinancials() overwrites this with
+// the real contractPrice + lateFees - amountPaid computed from Installment —
+// Mongoose virtuals are synchronous and can't run that query themselves.
 fileSchema.virtual('balanceAmount').get(function () {
-  return this.totalAmount - this.downPayment;
-});
-
-fileSchema.virtual('paymentPercentage').get(function () {
-  if (this.totalAmount === 0) return 0;
-  return Math.round((this.downPayment / this.totalAmount) * 100);
+  return this.contractPrice;
 });
 
 fileSchema.virtual('fileAge').get(function () {
@@ -421,8 +423,12 @@ fileSchema.statics.getFileStatistics = function () {
         activeFiles: { $sum: { $cond: [{ $eq: ['$status', FileStatus.ACTIVE] }, 1, 0] } },
         pendingFiles: { $sum: { $cond: [{ $eq: ['$status', FileStatus.PENDING] }, 1, 0] } },
         cancelledFiles: { $sum: { $cond: [{ $eq: ['$status', FileStatus.CANCELLED] }, 1, 0] } },
-        totalAmount: { $sum: '$totalAmount' },
-        totalDownPayment: { $sum: '$downPayment' },
+        totalContractPrice: { $sum: '$contractPrice' },
+        // totalDownPayment dropped: downPayment is no longer a raw stored field
+        // (it's derived from the Installment ledger). This static is currently
+        // unused — fileService.getFileStatistics() is the real implementation
+        // and does the ledger lookup properly. Kept in sync here so it isn't
+        // silently wrong if ever called.
       },
     },
   ]);

@@ -1,62 +1,10 @@
 // src/lib/constants/fileForm.constants.ts
-import { apiClient } from "@/lib/API/client";
 import { FieldConfig } from "@/components/shared/EntityForm/EntityForm";
 import { FileFormData } from "@/lib/schemas/file.schema";
 import { FileStatus, PaymentMode } from "@/lib/types/file";
 
 const getMemberId = (v: unknown): string | undefined =>
   typeof v === "string" ? v : v && typeof v === "object" && "_id" in (v as object) ? String((v as { _id: string })._id) : undefined;
-
-// Auto-fill Down Payment and Total Amount once both Plan and Plot are selected:
-// - Down Payment = the Plan's "Down Payment" category row (percentage or fixed
-//   amount) applied against the selected Plot's actual price. This is a portion
-//   of Total Amount, paid upfront - not an addition on top of it.
-// - Total Amount = the selected Plot's actual price + the Plan's base/application
-//   charges (e.g. processing fee). Balance (computed server-side) is then
-//   Total Amount - Down Payment, i.e. what's left to pay via installments.
-const applyPlanAndPlotCalculations = async (form: any) => {
-  const values = form.getValues();
-  const planId = values.planId;
-  const plotId = values.plotId;
-  if (!planId || typeof planId !== "string") return;
-
-  try {
-    const requests: [Promise<any>, Promise<any> | null] = [
-      apiClient.get<{ data?: { totalAmount?: number } }>(`/installment-plans/${planId}`),
-      plotId && typeof plotId === "string"
-        ? apiClient.get<{ data?: { plotTotalAmount?: number } }>(`/plots/${plotId}`)
-        : null,
-    ];
-    const [planRes, plotRes] = await Promise.all(requests);
-
-    const planCharges = planRes?.data?.data?.totalAmount || 0;
-    const plotTotalAmount = plotRes?.data?.data?.plotTotalAmount || 0;
-
-    let downPayment = 0;
-    if (plotTotalAmount > 0) {
-      const detailsRes = await apiClient.get<{ data?: Array<any> }>(
-        `/installment-plan-details/plan/${planId}`
-      );
-      const details = detailsRes?.data?.data || [];
-      const downPaymentRow = details.find((d: any) =>
-        String(d?.instCatId?.instCatName || "").toLowerCase().includes("down")
-      );
-      if (downPaymentRow) {
-        downPayment =
-          downPaymentRow.fixedAmount > 0
-            ? downPaymentRow.fixedAmount
-            : Math.round((downPaymentRow.percentageAmount / 100) * plotTotalAmount * 100) / 100;
-        form.setValue("downPayment", downPayment);
-      }
-    }
-
-    if (planCharges > 0 || plotTotalAmount > 0) {
-      form.setValue("totalAmount", plotTotalAmount + planCharges);
-    }
-  } catch {
-    /* ignore - fields stay manual if this lookup fails */
-  }
-};
 
 export const fileFormFields: FieldConfig<FileFormData>[] = [
   {
@@ -108,9 +56,6 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     },
     placeholder: "Select installment plan (optional)",
     description: "Choose the plan (plans shown for selected project)",
-    onChange: async (_value, form) => {
-      await applyPlanAndPlotCalculations(form);
-    },
   },
   {
     name: "memId",
@@ -167,9 +112,6 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     },
     placeholder: "Select plot",
     description: "Choose the plot for this file (required)",
-    onChange: async (_value, form) => {
-      await applyPlanAndPlotCalculations(form);
-    },
   },
   {
     name: "applicationId",
@@ -187,26 +129,10 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     description: "Choose the application for this file",
   },
   {
-    name: "totalAmount",
-    label: "Total Amount",
-    type: "number",
-    required: true,
-    placeholder: "Enter total amount",
-    description: "Total amount for the file",
-    min: 0,
-    step: 0.01,
-  },
-  {
-    name: "downPayment",
-    label: "Down Payment",
-    type: "number",
-    required: true,
-    placeholder: "Enter down payment amount",
-    description: "Down payment amount",
-    min: 0,
-    step: 0.01,
-  },
-  {
+    // contractPrice is snapshotted server-side from the plot's price at
+    // booking and is never a form field — the full installment ledger
+    // (including any down payment) is generated atomically at the same
+    // time, so there's nothing to hand-enter here anymore.
     name: "paymentMode",
     label: "Payment Mode",
     type: "select",
@@ -349,26 +275,8 @@ export const updateFileFormFields: FieldConfig<any>[] = [
     description: "Choose the plot for this file (required)",
   },
   {
-    name: "totalAmount",
-    label: "Total Amount",
-    type: "number",
-    required: false,
-    placeholder: "Enter total amount",
-    description: "Total amount for the file",
-    min: 0,
-    step: 0.01,
-  },
-  {
-    name: "downPayment",
-    label: "Down Payment",
-    type: "number",
-    required: false,
-    placeholder: "Enter down payment amount",
-    description: "Down payment amount",
-    min: 0,
-    step: 0.01,
-  },
-  {
+    // contractPrice/downPayment are server-derived — no revision workflow
+    // exists yet to let staff edit them through this form.
     name: "paymentMode",
     label: "Payment Mode",
     type: "select",

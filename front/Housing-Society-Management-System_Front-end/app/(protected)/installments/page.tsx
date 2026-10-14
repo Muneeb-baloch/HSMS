@@ -12,7 +12,7 @@ import {
   useDashboardSummary,
   useDeleteInstallment,
   useInstallments,
-  useToggleInstallmentStatus
+  useRecordPayment
 } from '@/lib/hooks/entities/useInstallment'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks'
@@ -20,6 +20,7 @@ import { resetFilters, setFilters } from '@/lib/store/slices/installmentSlice'
 import {
   InstallmentStatus,
   InstallmentType,
+  PaymentMode,
   type Installment
 } from '@/lib/types/installment'
 import {
@@ -52,7 +53,7 @@ export default function InstallmentsPage () {
   const { data, isLoading, refetch } = useInstallments(filters)
   const { data: dashboardSummary } = useDashboardSummary()
   const deleteMutation = useDeleteInstallment()
-  const toggleStatusMutation = useToggleInstallmentStatus()
+  const recordPaymentMutation = useRecordPayment()
   const bulkUpdateMutation = useBulkUpdateStatus()
 
   const canCreate =
@@ -107,9 +108,35 @@ export default function InstallmentsPage () {
     }
   }
 
-  const handleToggleStatus = async (id: string, status: string) => {
-    if (canUpdate && await confirm({ title: "Confirm", description: `Are you sure you want to update the status?` })) {
-      await toggleStatusMutation.mutateAsync({ id, status })
+  // "Mark as Paid" records a real payment for the remaining balance (status is
+  // derived from amountPaid — it is never set directly). For a partial payment
+  // or a non-cash method, use "Record Payment" instead.
+  const remainingBalance = (row: Installment) =>
+    typeof row.balanceAmount === 'number'
+      ? row.balanceAmount
+      : (row.totalPayable ?? row.amountDue) - (row.amountPaid ?? 0)
+
+  const handleMarkPaid = async (row: Installment) => {
+    if (!canUpdate) return
+    const balance = remainingBalance(row)
+    if (balance <= 0) {
+      customToast.error('This installment is already fully paid')
+      return
+    }
+    if (
+      await confirm({
+        title: 'Mark as Paid',
+        description: `Record a payment of Rs. ${balance.toLocaleString()} (today, Cash) for this installment? Use "Record Payment" for a partial amount or another method.`
+      })
+    ) {
+      await recordPaymentMutation.mutateAsync({
+        id: row._id,
+        data: {
+          amountPaid: balance,
+          paidDate: new Date().toISOString(),
+          paymentMode: PaymentMode.CASH
+        }
+      })
     }
   }
 
@@ -188,6 +215,46 @@ export default function InstallmentsPage () {
       } catch (error) {
         customToast.error('Failed to update status')
       }
+    }
+  }
+
+  // Bulk "Mark as Paid" records a real payment (remaining balance, today, Cash)
+  // for each selected row — status is never set directly.
+  const handleBulkMarkPaid = async () => {
+    if (selectedIds.length === 0) {
+      customToast.error('Please select installments to mark paid')
+      return
+    }
+    const rows = (data?.items || []).filter(r => selectedIds.includes(r._id))
+    const payable = rows.filter(r => remainingBalance(r) > 0)
+    if (payable.length === 0) {
+      customToast.error('All selected installments are already fully paid')
+      return
+    }
+    if (
+      await confirm({
+        title: 'Mark as Paid',
+        description: `Record a Cash payment (today) for the remaining balance of ${payable.length} installment(s)? Use "Record Payment" for partial amounts or other methods.`
+      })
+    ) {
+      let ok = 0
+      for (const r of payable) {
+        try {
+          await recordPaymentMutation.mutateAsync({
+            id: r._id,
+            data: {
+              amountPaid: remainingBalance(r),
+              paidDate: new Date().toISOString(),
+              paymentMode: PaymentMode.CASH
+            }
+          })
+          ok++
+        } catch {
+          /* per-row errors already surface via the mutation's onError toast */
+        }
+      }
+      customToast.success(`Recorded payment on ${ok} of ${payable.length} installment(s)`)
+      setSelectedIds([])
     }
   }
 
@@ -288,15 +355,9 @@ export default function InstallmentsPage () {
           variant: 'outline' as const
         },
         {
-          label: 'Toggle Paid Status',
+          label: 'Mark as Paid',
           icon: <span>✅</span>,
-          onClick: (row: Installment) =>
-            handleToggleStatus(
-              row._id,
-              row.status === InstallmentStatus.PAID
-                ? InstallmentStatus.UNPAID
-                : InstallmentStatus.PAID
-            ),
+          onClick: (row: Installment) => handleMarkPaid(row),
           variant: 'outline' as const
         }
       ]
@@ -414,8 +475,8 @@ export default function InstallmentsPage () {
                 <Button
                   variant='glass'
                   size='sm'
-                  onClick={() => handleBulkStatusUpdate(InstallmentStatus.PAID)}
-                  disabled={bulkUpdateMutation.isPending}
+                  onClick={handleBulkMarkPaid}
+                  disabled={recordPaymentMutation.isPending}
                 >
                   Mark as Paid
                 </Button>

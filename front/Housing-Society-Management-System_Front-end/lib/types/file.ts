@@ -113,8 +113,18 @@ export interface File {
     nextActions?: string[];
     _id: string;
   };
-  totalAmount: number;
-  downPayment: number;
+  // contractPrice is server-snapshotted from the plot's price at booking —
+  // never entered by hand. downPayment/balanceAmount/paymentPercentage are
+  // computed from the Installment ledger on every read, not stored fields.
+  contractPrice: number;
+  priceSnapshotAt?: string;
+  downPayment?: number;
+  downPaymentPaid?: number;
+  downPaymentStatus?: 'none' | 'unpaid' | 'partial' | 'paid';
+  // balanceAmount === plotBalance (what's owed on the plot only, excludes
+  // possession/legal/other fee rows). totalOutstanding includes those fees too.
+  plotBalance?: number;
+  totalOutstanding?: number;
   paymentMode: string;
   isAdjusted: boolean;
   adjustmentRef?: string;
@@ -159,8 +169,7 @@ export interface CreateFileDto {
   applicationId?: string;
   plotId: string;
   societyId?: string;
-  totalAmount: number;
-  downPayment: number;
+  // contractPrice is NOT submitted — the server snapshots it from the plot.
   paymentMode: string;
   isAdjusted?: boolean;
   adjustmentRef?: string;
@@ -174,8 +183,6 @@ export interface UpdateFileDto {
   planId?: string;
   nomineeId?: string;
   plotId?: string;
-  totalAmount?: number;
-  downPayment?: number;
   paymentMode?: string;
   isAdjusted?: boolean;
   adjustmentRef?: string;

@@ -34,17 +34,8 @@ export const validateCreateFile = (): ValidationChain[] => [
     .isMongoId()
     .withMessage('Invalid Plot ID'),
 
-  body('totalAmount')
-    .notEmpty()
-    .withMessage('Total amount is required')
-    .isFloat({ min: 0 })
-    .withMessage('Total amount must be a positive number'),
-
-  body('downPayment')
-    .notEmpty()
-    .withMessage('Down payment is required')
-    .isFloat({ min: 0 })
-    .withMessage('Down payment must be a positive number'),
+  // contractPrice is never accepted from the client — fileService.createFile
+  // snapshots it server-side from the plot's price at booking time.
 
   body('paymentMode')
     .notEmpty()
@@ -77,13 +68,6 @@ export const validateCreateFile = (): ValidationChain[] => [
     .isISO8601()
     .withMessage('Please provide a valid expected completion date'),
 
-  // Custom validation for down payment
-  body().custom((_value, { req }) => {
-    if (req.body.downPayment > req.body.totalAmount) {
-      throw new Error('Down payment cannot exceed total amount');
-    }
-    return true;
-  }),
 ];
 
 export const validateUpdateFile = (): ValidationChain[] => [
@@ -93,15 +77,8 @@ export const validateUpdateFile = (): ValidationChain[] => [
 
   body('plotId').optional().isMongoId().withMessage('Invalid Plot ID'),
 
-  body('totalAmount')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Total amount must be a positive number'),
-
-  body('downPayment')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Down payment must be a positive number'),
+  // contractPrice is not client-writable through update — no revision
+  // workflow exists yet (see service-file.ts updateFile notes).
 
   body('paymentMode')
     .optional()
@@ -194,8 +171,9 @@ export const validateGetFiles = (): ValidationChain[] => [
     .isIn([
       'fileRegNo',
       'bookingDate',
-      'totalAmount',
-      'downPayment',
+      'contractPrice',
+      // downPayment is ledger-derived, not a raw field — can't be sorted
+      // via a simple Mongo field sort.
       'status',
       'createdAt',
       'updatedAt',

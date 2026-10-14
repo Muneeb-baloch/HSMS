@@ -2,61 +2,21 @@ import cron, { ScheduledTask } from 'node-cron';
 import { Types } from 'mongoose';
 import logger from '../core/logger';
 import Installment, {
+  flattenFileMemberPlot,
   InstallmentStatus,
-  InstallmentType,
 } from '../Installment/models/models-installment';
 import InstallmentPlan from '../Installment/models/models-installment-plan';
 import InstallmentPlanDetail from '../Installment/models/models-installment-plan-detail';
+import {
+  buildInstallmentRows,
+  RECONCILIATION_TOLERANCE,
+} from '../Installment/services/service-installment';
 import File, { FileStatus } from '../File/models/models-file';
 import Notification from '../Notification/models/models-notification';
 import { CRON_CONFIG } from './cron-config';
 
 let installmentTask: ScheduledTask | null = null;
 let overdueTask: ScheduledTask | null = null;
-
-/**
- * Calculate the due date for a specific occurrence based on the file's booking date
- * and the plan's total months to determine frequency.
- */
-function calculateDueDate(bookingDate: Date, occurrence: number, _totalMonths: number): Date {
-  const dueDate = new Date(bookingDate);
-  // Each occurrence represents a month increment from the booking date
-  // occurrence 1 = bookingDate, occurrence 2 = bookingDate + 1 month, etc.
-  const monthsToAdd = occurrence - 1;
-  dueDate.setMonth(dueDate.getMonth() + monthsToAdd);
-  return dueDate;
-}
-
-/**
- * Calculate the installment amount based on the plan detail configuration.
- * Uses percentageAmount if > 0, otherwise falls back to fixedAmount.
- */
-function calculateAmount(
-  percentageAmount: number,
-  fixedAmount: number,
-  fileTotalAmount: number
-): number {
-  if (percentageAmount > 0) {
-    return (fileTotalAmount * percentageAmount) / 100;
-  }
-  return fixedAmount;
-}
-
-/**
- * Determine the installment type based on the occurrence and total months.
- */
-function determineInstallmentType(occurrence: number, totalMonths: number): InstallmentType {
-  if (occurrence === 1) {
-    return InstallmentType.DOWN_PAYMENT;
-  }
-  if (totalMonths <= 12) {
-    return InstallmentType.MONTHLY;
-  }
-  if (totalMonths <= 48 && totalMonths % 3 === 0) {
-    return InstallmentType.QUARTERLY;
-  }
-  return InstallmentType.MONTHLY;
-}
 
 /**
  * Generate due installments for all active files linked to active installment plans.
@@ -109,13 +69,15 @@ export async function generateDueInstallments(): Promise<number> {
           `[InstallmentCron] Processing ${files.length} files for plan: ${plan.planName}`
         );
 
-        // Get all plan details for this plan, sorted by occurrence
+        // Get all plan details for this plan, sorted by occurrence. Populated
+        // with kind so buildInstallmentRows can tag installmentType
+        // deterministically and apply the transfer-fee guard.
         const planDetails = await InstallmentPlanDetail.find({
           planId: plan._id,
           isDeleted: false,
         })
-          .sort({ occurrence: 1 })
-          .lean();
+          .populate('instCatId', 'instCatName kind')
+          .sort({ occurrence: 1 });
 
         if (planDetails.length === 0) {
           logger.warn(
@@ -138,59 +100,45 @@ export async function generateDueInstallments(): Promise<number> {
               existingInstallments.map((inst) => inst.installmentNo)
             );
 
-            for (const detail of planDetails) {
+            // Same calculator used at booking time and by the manual
+            // generate-from-plan action — basis is the file's frozen
+            // contractPrice, never a live plot/file total.
+            const { rows, reconciledTotal } = buildInstallmentRows({
+              contractPrice: file.contractPrice,
+              startDate: file.bookingDate,
+              planDetails,
+            });
+
+            if (Math.abs(reconciledTotal - file.contractPrice) > RECONCILIATION_TOLERANCE) {
+              logger.error(
+                `[InstallmentCron] Plan "${plan.planName}" does not reconcile for file ` +
+                  `${file.fileRegNo}: rows sum to ${reconciledTotal}, contractPrice is ` +
+                  `${file.contractPrice}. Skipping this file until the plan is fixed.`
+              );
+              continue;
+            }
+
+            for (const row of rows) {
               // Skip if this occurrence already has an installment
-              if (existingOccurrences.has(detail.occurrence)) {
+              if (existingOccurrences.has(row.installmentNo)) {
                 continue;
               }
-
-              // Calculate due date for this occurrence
-              const dueDate = calculateDueDate(
-                file.bookingDate,
-                detail.occurrence,
-                plan.totalMonths
-              );
 
               // Only create if the due date is on or before today
-              if (dueDate > today) {
+              if (row.dueDate > today) {
                 continue;
               }
 
-              // Calculate installment amount
-              const amountDue = calculateAmount(
-                detail.percentageAmount,
-                detail.fixedAmount,
-                file.totalAmount
-              );
-
-              // Determine installment type
-              const installmentType = determineInstallmentType(
-                detail.occurrence,
-                plan.totalMonths
-              );
-
-              // Determine initial status based on due date
               const now = new Date();
               now.setHours(0, 0, 0, 0);
-              const status =
-                dueDate < now ? InstallmentStatus.OVERDUE : InstallmentStatus.UNPAID;
+              const status = row.dueDate < now ? InstallmentStatus.OVERDUE : InstallmentStatus.UNPAID;
 
-              // Create the installment record
               const installment = new Installment({
+                ...row,
                 fileId: file._id,
-                memId: file.memId,
-                plotId: file.plotId,
-                installmentCategoryId: detail.instCatId,
-                installmentNo: detail.occurrence,
-                installmentTitle: `${plan.planName} - Installment #${detail.occurrence}`,
-                installmentType,
-                dueDate,
-                amountDue,
-                lateFeeSurcharge: 0,
-                totalPayable: amountDue,
-                amountPaid: 0,
-                balanceAmount: amountDue,
+                installmentTitle: `${plan.planName} - ${row.installmentTitle}`,
                 status,
+                societyId: file.societyId,
                 createdBy: systemUserId,
                 isDeleted: false,
               });
@@ -199,8 +147,8 @@ export async function generateDueInstallments(): Promise<number> {
               totalCreated++;
 
               logger.info(
-                `[InstallmentCron] Created installment #${detail.occurrence} for file ${file.fileRegNo} ` +
-                  `(amount: ${amountDue}, dueDate: ${dueDate.toISOString()}, status: ${status})`
+                `[InstallmentCron] Created installment #${row.installmentNo} for file ${file.fileRegNo} ` +
+                  `(amount: ${row.amountDue}, dueDate: ${row.dueDate.toISOString()}, status: ${status})`
               );
             }
           } catch (fileError) {
@@ -333,10 +281,19 @@ export async function sendDueReminders(): Promise<number> {
       status: InstallmentStatus.UNPAID,
       isDeleted: false,
     })
-      .populate('file', 'fileRegNo')
-      .populate('member', 'memName')
-      .populate('plot', 'plotNo')
+      .populate({
+        path: 'file',
+        select: 'fileRegNo',
+        populate: [
+          { path: 'member', select: 'memName' },
+          { path: 'plot', select: 'plotNo' },
+        ],
+      })
       .lean();
+
+    // member/plot no longer live directly on Installment — flatten them back
+    // from the nested file populate so the reads below don't need to change.
+    upcomingInstallments.forEach(inst => flattenFileMemberPlot(inst));
 
     if (upcomingInstallments.length === 0) {
       logger.info('[InstallmentCron] No upcoming installments requiring reminders');

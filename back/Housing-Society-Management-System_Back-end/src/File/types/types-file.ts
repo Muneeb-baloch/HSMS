@@ -12,8 +12,8 @@ export interface FileType {
   applicationId?: Types.ObjectId;
   plotId: Types.ObjectId; // REQUIRED
 
-  totalAmount: number;
-  downPayment: number;
+  contractPrice: number;
+  priceSnapshotAt: Date;
   paymentMode: PaymentMode;
   isAdjusted: boolean;
   adjustmentRef?: string;
@@ -39,7 +39,17 @@ export interface FileType {
   plot?: any;
   createdByUser?: any;
   modifiedByUser?: any;
+  // downPayment/balanceAmount/paymentPercentage are attached post-query by
+  // fileService.attachFinancials() from the Installment ledger — not raw
+  // schema fields, not writable via Create/UpdateFileDto.
+  downPayment?: number;
+  downPaymentPaid?: number;
+  downPaymentStatus?: 'none' | 'unpaid' | 'partial' | 'paid';
+  // balanceAmount === plotBalance (what's owed on the plot only). totalOutstanding
+  // additionally includes possession/legal/other fee rows.
   balanceAmount?: number;
+  plotBalance?: number;
+  totalOutstanding?: number;
   paymentPercentage?: number;
   fileAge?: number;
   statusBadgeColor?: string;
@@ -52,8 +62,8 @@ export interface CreateFileDto {
   nomineeId?: string;
   applicationId?: string;
   plotId: string; // REQUIRED
-  totalAmount: number;
-  downPayment: number;
+  // contractPrice is NOT accepted from the client — it's snapshotted
+  // server-side from Plot.plotTotalAmount in fileService.createFile.
   paymentMode: PaymentMode;
   isAdjusted?: boolean;
   adjustmentRef?: string;
@@ -66,8 +76,6 @@ export interface UpdateFileDto {
   planId?: string;
   nomineeId?: string;
   plotId?: string;
-  totalAmount?: number;
-  downPayment?: number;
   paymentMode?: PaymentMode;
   isAdjusted?: boolean;
   adjustmentRef?: string;
@@ -108,9 +116,9 @@ export interface FileStatistics {
   pendingFiles: number;
   cancelledFiles: number;
   closedFiles: number;
-  totalAmount: number;
+  totalContractPrice: number;
   totalDownPayment: number;
-  averageAmount: number;
+  averageContractPrice: number;
   averageDownPayment: number;
   byStatus: Record<string, number>;
   byProject: Record<string, number>;
@@ -127,7 +135,7 @@ export interface FileDashboardSummary {
     projectId: Types.ObjectId;
     projectName: string;
     fileCount: number;
-    totalAmount: number;
+    totalContractPrice: number;
   }>;
 }
 
