@@ -1,5 +1,9 @@
 // src/lib/constants/installmentCategoryForm.constants.ts
 import { FieldConfig } from "@/components/shared/EntityForm/EntityForm";
+import {
+  INSTALLMENT_CATEGORY_KIND_LABELS,
+  InstallmentCategoryKind,
+} from "@/lib/types/installmentCategory";
 import { InstallmentCategoryFormData } from "@/lib/schemas/installmentCategory.schema";
 
 export const installmentCategoryFormFields: FieldConfig<InstallmentCategoryFormData>[] =
@@ -19,6 +23,19 @@ export const installmentCategoryFormFields: FieldConfig<InstallmentCategoryFormD
       required: false,
       placeholder: "Enter category description",
       rows: 3,
+    },
+    {
+      name: "kind",
+      label: "Kind",
+      type: "select",
+      required: true,
+      options: Object.values(InstallmentCategoryKind).map((kind) => ({
+        label: INSTALLMENT_CATEGORY_KIND_LABELS[kind],
+        value: kind,
+      })),
+      placeholder: "Select kind",
+      description:
+        "down_payment/installment count toward the plot price; everything else is a real charge tracked separately and excluded from it.",
     },
     {
       name: "sequenceOrder",

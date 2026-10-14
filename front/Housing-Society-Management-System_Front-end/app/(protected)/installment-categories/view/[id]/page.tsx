@@ -11,6 +11,7 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import { useInstallmentCategory } from '@/lib/hooks/entities/useInstallmentCategory'
+import { INSTALLMENT_CATEGORY_KIND_LABELS } from '@/lib/types/installmentCategory'
 import { formatDate } from '@/lib/utils/format'
 import {
   ArrowLeft,
@@ -195,6 +196,17 @@ export default function ViewInstallmentCategoryPage () {
                   </div>
                   <div className='font-semibold text-lg'>
                     {category.sequenceOrder}
+                  </div>
+                </div>
+
+                <div className='flex justify-between items-center'>
+                  <div className='flex items-center gap-2 text-gray-600'>
+                    <Shield className='h-4 w-4' />
+                    <span className='text-sm'>Kind</span>
+                  </div>
+                  <div className='font-semibold'>
+                    {INSTALLMENT_CATEGORY_KIND_LABELS[category.kind] ||
+                      category.kind}
                   </div>
                 </div>
 

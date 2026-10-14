@@ -25,6 +25,9 @@ export enum InstallmentType {
   DEVELOPMENT_CHARGES = 'Development Charges',
   LEGAL_FEE = 'Legal Fee',
   TRANSFER_FEE = 'Transfer Fee',
+  APPLICATION_FEE = 'Application Fee',
+  NOC_FEE = 'NOC Fee',
+  REGISTRY_FEE = 'Registry Fee',
   OTHER = 'Other',
 }
 

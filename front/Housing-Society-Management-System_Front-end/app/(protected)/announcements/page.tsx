@@ -122,7 +122,7 @@ export default function AnnouncementsPage () {
     <div className='p-6 space-y-6'>
       {/* Header */}
       <div>
-        <h1 className='text-2xl font-bold text-white'>Announcements</h1>
+        <h1 className='text-2xl font-bold'>Announcements</h1>
         <p className='text-muted-foreground mt-1'>
           Manage system-wide announcements and notifications
         </p>

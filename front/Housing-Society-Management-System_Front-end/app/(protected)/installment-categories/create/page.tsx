@@ -15,7 +15,10 @@ import { hasPermission, UserRole } from '@/lib/constants/roles'
 import { useCreateInstallmentCategory } from '@/lib/hooks/entities/useInstallmentCategory'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { installmentCategorySchema } from '@/lib/schemas/installmentCategory.schema'
-import { CreateInstallmentCategoryDto } from '@/lib/types/installmentCategory'
+import {
+  CreateInstallmentCategoryDto,
+  InstallmentCategoryKind
+} from '@/lib/types/installmentCategory'
 import { apiClient } from '@/lib/API/client'
 import { ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -130,6 +133,7 @@ export default function CreateInstallmentCategoryPage () {
               cancelLabel='Cancel'
               isLoading={createMutation.isPending}
               defaultValues={{
+                kind: InstallmentCategoryKind.OTHER,
                 isRefundable: false,
                 isMandatory: true,
                 isActive: true,

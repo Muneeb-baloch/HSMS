@@ -154,7 +154,7 @@ export default function AnnouncementCategoriesPage () {
     <div className='p-6 space-y-6'>
       {/* Header */}
       <div>
-        <h1 className='text-2xl font-bold text-white'>Announcement Categories</h1>
+        <h1 className='text-2xl font-bold'>Announcement Categories</h1>
         <p className='text-muted-foreground mt-1'>
           Manage announcement grouping categories
         </p>

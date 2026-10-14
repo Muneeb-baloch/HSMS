@@ -19,7 +19,7 @@ export default function PrivacyAccessLogPage() {
       </Button>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Privacy Access Log</h1>
+        <h1 className="text-2xl font-bold">Privacy Access Log</h1>
         <p className="text-muted-foreground mt-1">
           View who has accessed your personal data and when
         </p>

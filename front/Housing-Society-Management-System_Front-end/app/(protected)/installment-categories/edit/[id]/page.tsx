@@ -86,6 +86,7 @@ export default function EditInstallmentCategoryPage () {
   const defaultValues = {
     instCatName: category.instCatName,
     instCatDescription: category.instCatDescription || '',
+    kind: category.kind,
     isRefundable: category.isRefundable,
     isMandatory: category.isMandatory,
     sequenceOrder: category.sequenceOrder,

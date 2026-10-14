@@ -10,9 +10,18 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useInstallmentPlan } from '@/lib/hooks/entities/useInstallmentPlan'
+import { useInstallmentPlanDetailsByPlan } from '@/lib/hooks/entities/useInstallmentPlanDetail'
 import { formatCurrency, formatDate } from '@/lib/utils/format'
-import { ArrowLeft, Edit, Loader2 } from 'lucide-react'
+import { ArrowLeft, Edit, Loader2, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/hooks/useAuth'
@@ -26,6 +35,8 @@ export default function ViewInstallmentPlanPage () {
   const id = params.id as string
 
   const { data: plan, isLoading, error } = useInstallmentPlan(id)
+  const { data: details, isLoading: detailsLoading } =
+    useInstallmentPlanDetailsByPlan(id)
 
   const canUpdate =
     user &&
@@ -147,6 +158,89 @@ export default function ViewInstallmentPlanPage () {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className='flex flex-row items-center justify-between space-y-0'>
+          <div>
+            <CardTitle>Plan Breakdown</CardTitle>
+            <CardDescription>
+              Category and amount for each occurrence in this plan
+            </CardDescription>
+          </div>
+          {canUpdate && (
+            <Button variant='outline' size='sm' asChild>
+              <Link href='/installment-plan-details/create'>
+                <Plus className='mr-2 h-4 w-4' />
+                Add Detail
+              </Link>
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {detailsLoading ? (
+            <div className='flex justify-center py-8'>
+              <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
+            </div>
+          ) : !details || details.length === 0 ? (
+            <p className='text-sm text-muted-foreground py-4'>
+              No detail rows yet — this plan has nothing configured to
+              generate installments from.
+            </p>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Occurrence</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className='text-right'>Percentage</TableHead>
+                    <TableHead className='text-right'>Fixed Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...details]
+                    .sort((a, b) => a.occurrence - b.occurrence)
+                    .map(detail => {
+                      const category =
+                        typeof detail.instCatId === 'object' &&
+                        detail.instCatId !== null
+                          ? (detail.instCatId as { instCatName?: string })
+                              .instCatName
+                          : '—'
+                      return (
+                        <TableRow key={detail._id}>
+                          <TableCell className='font-medium'>
+                            #{detail.occurrence}
+                          </TableCell>
+                          <TableCell>{category || '—'}</TableCell>
+                          <TableCell className='text-right'>
+                            {detail.percentageAmount > 0
+                              ? `${detail.percentageAmount}%`
+                              : '—'}
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            {detail.fixedAmount > 0
+                              ? formatCurrency(detail.fixedAmount)
+                              : '—'}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                </TableBody>
+              </Table>
+              <div className='flex justify-end mt-4 text-sm'>
+                <span className='text-muted-foreground mr-2'>
+                  Total percentage across all rows:
+                </span>
+                <span className='font-medium'>
+                  {details.reduce((sum, d) => sum + (d.percentageAmount || 0), 0)}
+                  %
+                </span>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

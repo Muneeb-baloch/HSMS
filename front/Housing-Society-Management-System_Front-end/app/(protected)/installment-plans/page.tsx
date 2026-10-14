@@ -144,7 +144,7 @@ export default function InstallmentPlansPage () {
   return (
     <div className='p-6 space-y-6'>
       <div>
-        <h1 className='text-2xl font-bold text-white'>Installment Plans</h1>
+        <h1 className='text-2xl font-bold'>Installment Plans</h1>
         <p className='text-muted-foreground mt-1'>
           Manage installment plans per project
         </p>

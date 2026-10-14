@@ -93,7 +93,7 @@ export default function PrivacyAdminPage() {
       </Button>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">
+        <h1 className="text-2xl font-bold">
           Privacy Administration
         </h1>
         <p className="text-muted-foreground mt-1">

@@ -153,4 +153,28 @@ export const DEFAULT_INSTALLMENT_CATEGORIES = [
     isMandatory: false,
     sequenceOrder: 10,
   },
+  {
+    instCatName: 'Application Fee',
+    instCatDescription: 'Fee charged for processing a membership/plot application',
+    kind: InstallmentCategoryKind.APPLICATION_FEE,
+    isRefundable: false,
+    isMandatory: false,
+    sequenceOrder: 11,
+  },
+  {
+    instCatName: 'NOC Fee',
+    instCatDescription: 'Fee for issuing a No Objection Certificate',
+    kind: InstallmentCategoryKind.NOC_FEE,
+    isRefundable: false,
+    isMandatory: false,
+    sequenceOrder: 12,
+  },
+  {
+    instCatName: 'Registry Fee',
+    instCatDescription: 'Fee for property registry documentation',
+    kind: InstallmentCategoryKind.REGISTRY_FEE,
+    isRefundable: false,
+    isMandatory: false,
+    sequenceOrder: 13,
+  },
 ];

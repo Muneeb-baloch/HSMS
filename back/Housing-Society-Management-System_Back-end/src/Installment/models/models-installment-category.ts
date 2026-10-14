@@ -9,6 +9,14 @@ export enum InstallmentCategoryKind {
   INSTALLMENT = 'installment',
   POSSESSION_FEE = 'possession_fee',
   LEGAL_FEE = 'legal_fee',
+  // Application/NOC/Registry have no dedicated fee tracking anywhere else in
+  // the app (Application, Registry, and NOC - which is only a PDF template -
+  // all have zero fee fields) — same "homeless fee" situation possession_fee/
+  // legal_fee were in, same fix: a tagged Installment row, excluded from the
+  // contractPrice reconciliation but included in File.totalOutstanding.
+  APPLICATION_FEE = 'application_fee',
+  NOC_FEE = 'noc_fee',
+  REGISTRY_FEE = 'registry_fee',
   OTHER = 'other',
 }
 

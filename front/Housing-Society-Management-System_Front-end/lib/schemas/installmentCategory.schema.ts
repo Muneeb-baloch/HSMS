@@ -1,5 +1,6 @@
 // src/lib/schemas/installmentCategory.schema.ts
 import * as z from "zod";
+import { InstallmentCategoryKind } from "@/lib/types/installmentCategory";
 
 export const installmentCategorySchema = z.object({
   instCatName: z
@@ -13,6 +14,10 @@ export const installmentCategorySchema = z.object({
     .max(500, "Description cannot exceed 500 characters")
     .optional()
     .or(z.literal("")),
+
+  kind: z.nativeEnum(InstallmentCategoryKind, {
+    errorMap: () => ({ message: "Kind is required" }),
+  }),
 
   isRefundable: z.boolean().default(false),
 

@@ -81,12 +81,16 @@ const INSTALLMENT_TYPE_BY_KIND: Record<string, string> = {
   [InstallmentCategoryKind.INSTALLMENT]: InstallmentType.MONTHLY,
   [InstallmentCategoryKind.POSSESSION_FEE]: InstallmentType.POSSESSION_FEE,
   [InstallmentCategoryKind.LEGAL_FEE]: InstallmentType.LEGAL_FEE,
+  [InstallmentCategoryKind.APPLICATION_FEE]: InstallmentType.APPLICATION_FEE,
+  [InstallmentCategoryKind.NOC_FEE]: InstallmentType.NOC_FEE,
+  [InstallmentCategoryKind.REGISTRY_FEE]: InstallmentType.REGISTRY_FEE,
   [InstallmentCategoryKind.OTHER]: InstallmentType.OTHER,
 };
 
 // kinds whose amounts must reconcile to File.contractPrice (down payment +
-// financed installments). possession_fee/legal_fee/other are real charges
-// that still get generated and tracked, just not part of that sum.
+// financed installments). possession_fee/legal_fee/application_fee/noc_fee/
+// registry_fee/other are real charges that still get generated and tracked,
+// just not part of that sum.
 const RECONCILED_KINDS = new Set<string>([
   InstallmentCategoryKind.DOWN_PAYMENT,
   InstallmentCategoryKind.INSTALLMENT,
