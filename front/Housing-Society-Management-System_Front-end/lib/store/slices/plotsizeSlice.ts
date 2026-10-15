@@ -13,6 +13,7 @@ interface PlotSizeState {
     areaUnit?: string;
     minArea?: number;
     maxArea?: number;
+    projectId?: string;
   };
 }
 

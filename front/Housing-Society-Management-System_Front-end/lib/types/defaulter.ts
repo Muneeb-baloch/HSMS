@@ -1,113 +1,72 @@
-export type DefaulterStatus =
-  | "Warning"
-  | "Suspended"
-  | "Legal Action"
-  | "Resolved";
+export type DefaulterStatus = "Warning" | "Suspended" | "Legal Action" | "Resolved";
 
-export interface Defaulter {
-  _id: string;
-  memId: string | { _id: string; memName?: string; fullName?: string; memNic?: string };
-  plotId:
-    | string
-    | {
-        _id: string;
-        plotNo?: string;
-        plotBlockId?: { plotBlockName?: string };
-        projectId?: { projName?: string };
-      };
-  fileId: string | { _id: string; fileRegNo?: string; fileNo?: string };
-  totalOverdueAmount: number;
-  lastPaymentDate?: Date | string;
-  daysOverdue: number;
-  noticeSentCount: number;
-  status: DefaulterStatus;
-  remarks?: string;
-  createdBy?: string | { _id: string; fullName?: string; userName?: string };
-  modifiedBy?: string | { _id: string; fullName?: string; userName?: string };
-  isActive: boolean;
-  resolvedAt?: Date | string;
-  createdAt: Date | string;
-  updatedAt: Date | string;
-}
-
-export interface CreateDefaulterDto {
-  memId: string;
-  plotId: string;
+/** One row of the live, ledger-derived defaulter list. */
+export interface DefaulterRow {
   fileId: string;
-  totalOverdueAmount: number;
-  lastPaymentDate?: string | Date;
-  noticeSentCount?: number;
-  remarks?: string;
-}
+  file?: { _id: string; fileRegNo?: string; fileBarCode?: string };
+  member?: { _id: string; memName?: string; fullName?: string; memNic?: string; mobileNo?: string };
+  plot?: {
+    _id: string;
+    plotNo?: string;
+    plotBlockId?: { _id: string; plotBlockName?: string };
+  };
 
-export interface UpdateDefaulterDto {
-  totalOverdueAmount?: number;
-  lastPaymentDate?: string | Date;
-  noticeSentCount?: number;
-  status?: DefaulterStatus;
+  daysOverdue: number;
+  oldestUnpaidDueDate: string;
+
+  installmentsOverdue: number;
+  billsOverdue: number;
+  totalOverdue: number;
+
+  suggestedStatus: DefaulterStatus;
+  statusOverride?: DefaulterStatus;
+  actualStatus: DefaulterStatus;
+
+  noticeSentCount: number;
   remarks?: string;
-  isActive?: boolean;
+  workflowId?: string;
 }
 
 export interface DefaulterQueryParams {
   page?: number;
   limit?: number;
   search?: string;
-  memId?: string;
-  plotId?: string;
-  fileId?: string;
   status?: DefaulterStatus;
   minAmount?: number;
   maxAmount?: number;
   minDays?: number;
   maxDays?: number;
-  isActive?: boolean;
-  sortBy?: string;
+  sortBy?: "daysOverdue" | "totalOverdue" | "installmentsOverdue" | "billsOverdue";
   sortOrder?: "asc" | "desc";
 }
 
 export interface DefaulterStatistics {
   totalDefaulters: number;
-  activeDefaulters: number;
   byStatus: Record<string, number>;
   totalOverdueAmount: number;
+  totalInstallmentsOverdue: number;
+  totalBillsOverdue: number;
   averageOverdueAmount: number;
   averageDaysOverdue: number;
   topDefaulters: Array<{
-    memId: string;
-    memName: string;
-    totalAmount: number;
+    fileId: string;
+    fileRegNo?: string;
+    memberName?: string;
+    totalOverdue: number;
     daysOverdue: number;
   }>;
-  byNoticeCount: Record<string, number>;
 }
 
-export interface OverdueSummary {
-  totalAmount: number;
-  byStatus: Array<{ status: string; amount: number; count: number }>;
-  byDaysRange: Array<{ range: string; amount: number; count: number }>;
+export interface SetStatusOverrideDto {
+  status: DefaulterStatus | null;
 }
 
-export interface ActiveCountResponse {
-  activeDefaulters: number;
-  totalOverdueAmount: number;
+export interface SetRemarksDto {
+  remarks: string;
 }
 
 export interface SendNoticeDto {
   noticeType: "WARNING" | "FINAL" | "LEGAL";
   noticeContent: string;
   sendMethod: "EMAIL" | "SMS" | "LETTER" | "ALL";
-}
-
-export interface ResolveDefaulterDto {
-  paymentAmount: number;
-  paymentDate: string | Date;
-  paymentMethod: string;
-  transactionId?: string;
-  remarks?: string;
-}
-
-export interface BulkUpdateStatusDto {
-  defaulterIds: string[];
-  status: DefaulterStatus;
 }

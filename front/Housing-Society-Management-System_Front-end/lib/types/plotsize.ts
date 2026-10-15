@@ -2,6 +2,13 @@
 export interface PlotSize {
   _id: string;
   plotSizeName: string;
+  projectId:
+    | {
+        _id: string;
+        projName: string;
+        projCode: string;
+      }
+    | string;
   totalArea: number;
   areaUnit: string;
   ratePerUnit: number;

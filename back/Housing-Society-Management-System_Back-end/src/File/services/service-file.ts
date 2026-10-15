@@ -16,7 +16,7 @@ import Member from '../../Member/models/models-member';
 import Nominee from '../../Nominee/models/models-nominee';
 import Plot from '../../Plots/models/models-plot';
 import Project from '../../Project/models/models-project';
-import File, { FileStatus } from '../models/models-file';
+import File, { FileStatus, PLOT_OCCUPYING_FILE_STATUSES } from '../models/models-file';
 import {
   AdjustFileDto,
   CreateFileDto,
@@ -248,7 +248,7 @@ export const fileService = {
     const existingFileWithPlot = await File.findOne({
       plotId: data.plotId,
       isDeleted: false,
-      status: { $in: [FileStatus.ACTIVE, FileStatus.PENDING] },
+      status: { $in: PLOT_OCCUPYING_FILE_STATUSES },
     });
 
     if (existingFileWithPlot) {
@@ -699,7 +699,7 @@ export const fileService = {
       const existingFileWithPlot = await File.findOne({
         plotId: data.plotId,
         isDeleted: false,
-        status: { $in: [FileStatus.ACTIVE, FileStatus.PENDING] },
+        status: { $in: PLOT_OCCUPYING_FILE_STATUSES },
         _id: { $ne: id },
       });
 
@@ -1462,7 +1462,7 @@ export const fileService = {
     const existingFileWithPlot = await File.findOne({
       plotId,
       isDeleted: false,
-      status: { $in: [FileStatus.ACTIVE, FileStatus.PENDING] },
+      status: { $in: PLOT_OCCUPYING_FILE_STATUSES },
       _id: { $ne: fileId },
     });
 

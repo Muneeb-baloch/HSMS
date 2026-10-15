@@ -110,6 +110,24 @@ const plotSizeSchema = new Schema<IPlotSize>(
   }
 );
 
+// Pre-validate middleware: standardBasePrice is required, but required-field
+// checks run before pre('save') hooks, so the pre('save') calculation below
+// never gets a chance to run for a brand-new document that omits it - it was
+// rejected with "Standard Base Price is required" first. Fill it in here,
+// before validation, only when missing; pre('save') still recomputes it
+// below for every actual save (new or modified), so this is purely about
+// satisfying the required check in time, not changing the final value.
+plotSizeSchema.pre('validate', function (next) {
+  if (
+    this.standardBasePrice === undefined &&
+    this.totalArea !== undefined &&
+    this.ratePerUnit !== undefined
+  ) {
+    this.standardBasePrice = parseFloat((this.totalArea * this.ratePerUnit).toFixed(2));
+  }
+  next();
+});
+
 // Pre-save middleware to calculate standardBasePrice
 plotSizeSchema.pre('save', function (next) {
   // Calculate standardBasePrice from totalArea x ratePerUnit

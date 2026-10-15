@@ -1,12 +1,9 @@
 import { defaulterApi } from "@/lib/API/defaulterApi";
 import {
-  Defaulter,
   DefaulterQueryParams,
-  CreateDefaulterDto,
-  UpdateDefaulterDto,
   SendNoticeDto,
-  ResolveDefaulterDto,
-  BulkUpdateStatusDto,
+  SetRemarksDto,
+  SetStatusOverrideDto,
 } from "@/lib/types/defaulter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { customToast } from "@/lib/utils/customToast";
@@ -41,98 +38,52 @@ export const useDefaulterStatistics = () => {
   });
 };
 
-export const useOverdueSummary = () => {
+export const useDefaulter = (fileId: string) => {
   return useQuery({
-    queryKey: [QUERY_KEY, "overdue-summary"],
+    queryKey: [QUERY_KEY, fileId],
     queryFn: async () => {
-      const response = await defaulterApi.getOverdueSummary();
-      if (response.data.success) return response.data.data;
-      throw new Error("Failed to fetch overdue summary");
-    },
-  });
-};
-
-export const useActiveCount = () => {
-  return useQuery({
-    queryKey: [QUERY_KEY, "active-count"],
-    queryFn: async () => {
-      const response = await defaulterApi.getActiveCount();
-      if (response.data.success) return response.data.data;
-      throw new Error("Failed to fetch active count");
-    },
-  });
-};
-
-export const useDefaulter = (id: string) => {
-  return useQuery({
-    queryKey: [QUERY_KEY, id],
-    queryFn: async () => {
-      const response = await defaulterApi.getDefaulter(id);
+      const response = await defaulterApi.getDefaulter(fileId);
       if (response.data.success) return response.data.data;
       throw new Error(response.data.message || "Failed to fetch defaulter");
     },
-    enabled: !!id,
+    enabled: !!fileId,
   });
 };
 
-export const useCreateDefaulter = () => {
+export const useSetStatusOverride = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: CreateDefaulterDto): Promise<Defaulter> => {
-      const response = await defaulterApi.create(data);
+    mutationFn: async ({ fileId, data }: { fileId: string; data: SetStatusOverrideDto }) => {
+      const response = await defaulterApi.setStatusOverride(fileId, data);
       if (response.data.success) return response.data.data;
-      throw new Error(response.data.message || "Failed to create defaulter");
-    },
-    onSuccess: () => {
-      customToast.success("Defaulter record created successfully");
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-    },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to create defaulter");
-    },
-  });
-};
-
-export const useUpdateDefaulter = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: UpdateDefaulterDto;
-    }): Promise<Defaulter> => {
-      const response = await defaulterApi.update(id, data);
-      if (response.data.success) return response.data.data;
-      throw new Error(response.data.message || "Failed to update defaulter");
+      throw new Error(response.data.message || "Failed to update status");
     },
     onSuccess: (data) => {
-      customToast.success("Defaulter updated successfully");
+      customToast.success("Status updated");
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data._id] });
+      if (data) queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data.fileId] });
     },
     onError: (error: Error) => {
-      customToast.error(error.message || "Failed to update defaulter");
+      customToast.error(error.message || "Failed to update status");
     },
   });
 };
 
-export const useDeleteDefaulter = () => {
+export const useSetRemarks = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string): Promise<void> => {
-      const response = await defaulterApi.delete(id);
-      if (!response.data.success) {
-        throw new Error(response.data.message || "Failed to delete defaulter");
-      }
+    mutationFn: async ({ fileId, data }: { fileId: string; data: SetRemarksDto }) => {
+      const response = await defaulterApi.setRemarks(fileId, data);
+      if (response.data.success) return response.data.data;
+      throw new Error(response.data.message || "Failed to update remarks");
     },
-    onSuccess: () => {
-      customToast.success("Defaulter deleted successfully");
+    onSuccess: (data) => {
+      customToast.success("Remarks updated");
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+      if (data) queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data.fileId] });
     },
     onError: (error: Error) => {
-      customToast.error(error.message || "Failed to delete defaulter");
+      customToast.error(error.message || "Failed to update remarks");
     },
   });
 };
@@ -140,67 +91,18 @@ export const useDeleteDefaulter = () => {
 export const useSendNotice = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: SendNoticeDto;
-    }): Promise<Defaulter> => {
-      const response = await defaulterApi.sendNotice(id, data);
+    mutationFn: async ({ fileId, data }: { fileId: string; data: SendNoticeDto }) => {
+      const response = await defaulterApi.sendNotice(fileId, data);
       if (response.data.success) return response.data.data;
       throw new Error(response.data.message || "Failed to send notice");
     },
     onSuccess: (data) => {
       customToast.success("Notice sent successfully");
       queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data._id] });
+      if (data) queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data.fileId] });
     },
     onError: (error: Error) => {
       customToast.error(error.message || "Failed to send notice");
-    },
-  });
-};
-
-export const useResolveDefaulter = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: ResolveDefaulterDto;
-    }): Promise<Defaulter> => {
-      const response = await defaulterApi.resolve(id, data);
-      if (response.data.success) return response.data.data;
-      throw new Error(response.data.message || "Failed to resolve defaulter");
-    },
-    onSuccess: (data) => {
-      customToast.success("Defaulter resolved successfully");
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data._id] });
-    },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to resolve defaulter");
-    },
-  });
-};
-
-export const useBulkUpdateStatus = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: BulkUpdateStatusDto) => {
-      const response = await defaulterApi.bulkUpdateStatus(data);
-      if (response.data.success) return response.data.data;
-      throw new Error(response.data.message || "Failed to update status");
-    },
-    onSuccess: () => {
-      customToast.success("Status updated successfully");
-      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
-    },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to update status");
     },
   });
 };

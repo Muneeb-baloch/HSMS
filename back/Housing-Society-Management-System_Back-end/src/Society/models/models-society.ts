@@ -6,6 +6,8 @@ export interface ISocietySettings {
   timezone: string;
   lateFeeEnabled: boolean;
   lateFeeRate: number;
+  /** Days an installment/bill must be overdue before its file appears on the Defaulter list. */
+  defaulterThresholdDays: number;
 }
 
 export interface ISociety extends Document {
@@ -169,6 +171,7 @@ const societySchema = new Schema<ISociety>(
         timezone: { type: String, default: 'Asia/Karachi' },
         lateFeeEnabled: { type: Boolean, default: false },
         lateFeeRate: { type: Number, default: 0, min: 0 },
+        defaulterThresholdDays: { type: Number, default: 30, min: 0 },
       },
       default: {
         currency: 'PKR',
@@ -176,6 +179,7 @@ const societySchema = new Schema<ISociety>(
         timezone: 'Asia/Karachi',
         lateFeeEnabled: false,
         lateFeeRate: 0,
+        defaulterThresholdDays: 30,
       },
     },
 

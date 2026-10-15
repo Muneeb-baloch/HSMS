@@ -10,7 +10,7 @@ import { useBillDashboardSummary } from "@/lib/hooks/entities/useBillInfo";
 import { useDashboardSummary as useInstallmentDashboardSummary } from "@/lib/hooks/entities/useInstallment";
 import { useTransfers, useDashboardSummary as useTransferDashboardSummary } from "@/lib/hooks/entities/useTransfer";
 import { useFileSummary } from "@/lib/hooks/entities/useFile";
-import { useOverdueSummary, useActiveCount } from "@/lib/hooks/entities/useDefaulter";
+import { useDefaulterStatistics } from "@/lib/hooks/entities/useDefaulter";
 import { useComplaints } from "@/lib/hooks/entities/useComplaint";
 import { useAnnouncements } from "@/lib/hooks/entities/useAnnouncements";
 import { useNominees } from "@/lib/hooks/entities/useNominee";
@@ -32,8 +32,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
   const installmentSummary = useInstallmentDashboardSummary();
   const transferSummary = useTransferDashboardSummary();
   const fileSummary = useFileSummary();
-  const defaulterOverdue = useOverdueSummary();
-  const defaulterActive = useActiveCount();
+  const defaulterStats = useDefaulterStatistics();
   const announcementsQuery = useAnnouncements({ page: 1, limit: 1 });
   const transfersQuery = useTransfers({ page: 1, limit: 1 });
 
@@ -53,7 +52,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
     const transfers = transfersQuery.data?.pagination?.total ?? 0;
     const installmentsDue = installmentSummary.data?.totalDueToday ?? 0;
     const installmentsOverdue = installmentSummary.data?.totalOverdue ?? 0;
-    const defaulters = (defaulterActive.data as { activeDefaulters?: number })?.activeDefaulters ?? 0;
+    const defaulters = defaulterStats.data?.totalDefaulters ?? 0;
     const billsPending = billSummary.data?.statistics?.totalPending ?? 0;
     const billsOverdue = billSummary.data?.statistics?.totalOverdue ?? 0;
     const complaintsOpen = complaintsQuery.data?.summary?.open ?? complaintsQuery.data?.pagination?.total ?? 0;
@@ -91,8 +90,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
     transfersQuery.data,
     installmentSummary.data,
     billSummary.data,
-    defaulterOverdue.data,
-    defaulterActive.data,
+    defaulterStats.data,
     complaintsQuery.data,
     announcementsQuery.data,
     fileSummary.data,
@@ -108,8 +106,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
     installmentSummary.isLoading ||
     transferSummary.isLoading ||
     fileSummary.isLoading ||
-    defaulterOverdue.isLoading ||
-    defaulterActive.isLoading ||
+    defaulterStats.isLoading ||
     complaintsQuery.isLoading ||
     transfersQuery.isLoading;
 
@@ -137,8 +134,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
       installmentSummary.refetch();
       transferSummary.refetch();
       fileSummary.refetch();
-      defaulterOverdue.refetch();
-      defaulterActive.refetch();
+      defaulterStats.refetch();
       complaintsQuery.refetch();
     },
     raw: {
@@ -146,8 +142,7 @@ export function useDashboardMetrics(roleFilter: { canSeeAdmin: boolean }) {
       installmentSummary: installmentSummary.data,
       transferSummary: transferSummary.data,
       fileSummary: fileSummary.data,
-      defaulterOverdue: defaulterOverdue.data,
-      defaulterActive: defaulterActive.data,
+      defaulterStats: defaulterStats.data,
       plotsSummary: plotsQuery.data?.summary,
     },
   };

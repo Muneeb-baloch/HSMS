@@ -3,9 +3,26 @@
 
 import { ActionBar } from '@/components/shared/PageTemplate'
 import { SummaryCard } from '@/components/shared/SummaryCard'
-import { EnhancedDataTable as DataTable } from '@/components/shared/DataTable/DataTable'
+import { ActionIcon } from '@/components/ui/ActionIcon/ActionIcon'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { plotSizeColumns } from '@/lib/constants/plotsizecolum.constants'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table'
 import { hasPermission, UserRole } from '@/lib/constants/roles'
 import {
   useDeletePlotSize,
@@ -13,216 +30,132 @@ import {
 } from '@/lib/hooks/entities/usePlotSize'
 import { useProjects } from '@/lib/hooks/entities/useProject'
 import { useAuth } from '@/lib/hooks/useAuth'
+import { PlotSize } from '@/lib/types/plotsize'
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks'
-import { setFilters } from '@/lib/store/slices/plotsizeSlice'
-import { Calculator, Plus, RefreshCw } from 'lucide-react'
+import { resetFilters, setFilters } from '@/lib/store/slices/plotsizeSlice'
+import {
+  Calculator,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  RefreshCw,
+  Search
+} from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState, useMemo } from 'react'
-import { useConfirm } from "@/components/shared/ConfirmDialog";
+import { useMemo, useState } from 'react'
+import { useConfirm } from '@/components/shared/ConfirmDialog'
 
 export default function PlotSizesPage () {
   const dispatch = useAppDispatch()
   const { user } = useAuth()
   const router = useRouter()
+  const { confirm } = useConfirm()
 
   const filters = useAppSelector(state => state.plotSizes?.filters || {})
-  const [searchValue, setSearchValue] = useState('')
-  const { confirm } = useConfirm();
 
   const { data: projectsData } = useProjects({ limit: 100 })
-  const projectOptions = useMemo(() =>
-    projectsData?.items?.map(p => ({ label: p.projName, value: p._id })) || [],
+  const projectOptions = useMemo(
+    () =>
+      projectsData?.items?.map(p => ({ label: p.projName, value: p._id })) ||
+      [],
     [projectsData?.items]
   )
 
-  const { data, isLoading, refetch } = usePlotSizes(filters)
+  // Grouping by project replaces row-level pagination, so fetch as many rows
+  // as the backend allows in one page rather than paginating raw rows, which
+  // would split a project's group across pages.
+  const { data, isLoading } = usePlotSizes({ ...filters, limit: 200 })
   const deleteMutation = useDeletePlotSize()
 
   const canCreate =
     user &&
-    hasPermission(
-      user.role as UserRole,
-      [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[]
-    )
+    hasPermission(user.role as UserRole, [
+      UserRole.ADMIN,
+      UserRole.SUPER_ADMIN
+    ] as UserRole[])
+  const canUpdate = canCreate
+  const canDelete = canCreate
 
-  const canUpdate =
-    user &&
-    hasPermission(
-      user.role as UserRole,
-      [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[]
-    )
+  // Collapsed-by-user-choice set — everything is expanded by default (a
+  // project isn't in this set) so nothing is hidden without an explicit click.
+  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(
+    new Set()
+  )
+  const toggleProject = (projectId: string) =>
+    setCollapsedProjectIds(prev => {
+      const next = new Set(prev)
+      next.has(projectId) ? next.delete(projectId) : next.add(projectId)
+      return next
+    })
 
-  const canDelete =
-    user &&
-    hasPermission(
-      user.role as UserRole,
-      [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[]
-    )
+  // Group the (already server-filtered) rows by project, so the project name
+  // is shown once as a group header instead of needing a separate lookup to
+  // tell which project a given plot size belongs to.
+  const groupedByProject = useMemo(() => {
+    const items = data?.items || []
+    const groups = new Map<
+      string,
+      { projectId: string; projectName: string; projectCode?: string; rows: PlotSize[] }
+    >()
+    for (const item of items) {
+      const projObj =
+        typeof item.projectId === 'object' && item.projectId !== null
+          ? (item.projectId as { _id: string; projName: string; projCode: string })
+          : null
+      const projectId = projObj?._id || (item.projectId as string) || 'unassigned'
+      const projectName = projObj?.projName || 'Unassigned / Legacy'
+      if (!groups.has(projectId)) {
+        groups.set(projectId, {
+          projectId,
+          projectName,
+          projectCode: projObj?.projCode,
+          rows: []
+        })
+      }
+      groups.get(projectId)!.rows.push(item)
+    }
+    for (const group of groups.values()) {
+      group.rows.sort((a, b) => a.plotSizeName.localeCompare(b.plotSizeName))
+    }
+    return [...groups.values()].sort((a, b) => {
+      if (a.projectId === 'unassigned') return 1
+      if (b.projectId === 'unassigned') return -1
+      return a.projectName.localeCompare(b.projectName)
+    })
+  }, [data?.items])
 
-  useEffect(() => {
-    refetch()
-  }, [filters, refetch])
-
-  const handleCreate = () => {
-    router.push('/plotsizes/create')
-  }
-
-  const handleEdit = (id: string) => {
-    router.push(`/plotsizes/edit/${id}`)
-  }
-
-  const handleView = (id: string) => {
-    router.push(`/plotsizes/view/${id}`)
-  }
+  const handleCreate = () => router.push('/plotsizes/create')
+  const handleEdit = (id: string) => router.push(`/plotsizes/edit/${id}`)
+  const handleView = (id: string) => router.push(`/plotsizes/view/${id}`)
 
   const handleDelete = async (id: string) => {
     if (
       canDelete &&
-      await confirm({ title: "Delete", description: 'Are you sure you want to delete this plot size?', variant: "destructive" })
+      (await confirm({
+        title: 'Delete',
+        description: 'Are you sure you want to delete this plot size?',
+        variant: 'destructive'
+      }))
     ) {
       await deleteMutation.mutateAsync(id)
     }
   }
 
   const handleSearch = (search: string) => {
-    setSearchValue(search)
-    dispatch(
-      setFilters({
-        search,
-        page: 1
-      })
-    )
-  }
-
-  const handleFilterChange = (newFilters: Record<string, unknown>) => {
-    dispatch(setFilters({ ...newFilters, page: 1 }))
-  }
-
-  const handlePageChange = (page: number) => {
-    dispatch(setFilters({ page }))
+    dispatch(setFilters({ search, page: 1 }))
   }
 
   const handleResetFilters = () => {
-    dispatch(
-      setFilters({
-        page: 1,
-        limit: 10,
-        search: '',
-        sortBy: 'totalArea',
-        sortOrder: 'asc',
-        minPrice: undefined,
-        maxPrice: undefined,
-        areaUnit: undefined,
-        minArea: undefined,
-        maxArea: undefined
-      })
-    )
-    setSearchValue('')
+    dispatch(resetFilters())
   }
 
-  const tableConfig = {
-    columns: plotSizeColumns,
-    filters: [
-      {
-        id: 'projectId',
-        label: 'Project',
-        type: 'select' as const,
-        options: projectOptions,
-        placeholder: 'Filter by project'
-      },
-      {
-        id: 'areaUnit',
-        label: 'Area Unit',
-        type: 'select' as const,
-        options: [
-          { label: 'Marla', value: 'marla' },
-          { label: 'Square Feet', value: 'sqft' },
-          { label: 'Square Meter', value: 'sqm' },
-          { label: 'Acre', value: 'acre' },
-          { label: 'Hectare', value: 'hectare' },
-          { label: 'Kanal', value: 'kanal' }
-        ]
-      },
-      {
-        id: 'minPrice',
-        label: 'Min Price',
-        type: 'text' as const,
-        placeholder: 'Min price'
-      },
-      {
-        id: 'maxPrice',
-        label: 'Max Price',
-        type: 'text' as const,
-        placeholder: 'Max price'
-      },
-      {
-        id: 'minArea',
-        label: 'Min Area',
-        type: 'text' as const,
-        placeholder: 'Min area'
-      },
-      {
-        id: 'maxArea',
-        label: 'Max Area',
-        type: 'text' as const,
-        placeholder: 'Max area'
-      },
-      {
-        id: 'sortBy',
-        label: 'Sort By',
-        type: 'select' as const,
-        options: [
-          { label: 'Total Area', value: 'totalArea' },
-          { label: 'Price', value: 'standardBasePrice' },
-          { label: 'Name', value: 'plotSizeName' },
-          { label: 'Created Date', value: 'createdAt' },
-          { label: 'Updated Date', value: 'updatedAt' }
-        ]
-      },
-      {
-        id: 'sortOrder',
-        label: 'Order',
-        type: 'select' as const,
-        options: [
-          { label: 'Ascending', value: 'asc' },
-          { label: 'Descending', value: 'desc' }
-        ]
-      }
-    ],
-    enableActions: true,
-    actions: {
-      onEdit: canUpdate ? handleEdit : undefined,
-      onDelete: canDelete ? handleDelete : undefined,
-      customActions: [
-        {
-          label: 'View Details',
-          icon: <span>👁️</span>,
-          onClick: (row: any) => handleView(row._id),
-          variant: 'outline' as const
-        },
-        {
-          label: 'Price Breakdown',
-          icon: <span>💰</span>,
-          onClick: (row: any) => router.push(`/plotsizes/breakdown/${row._id}`),
-          variant: 'outline' as const
-        }
-      ]
-    },
-    pagination: data?.pagination
-      ? {
-          currentPage: data.pagination.page,
-          totalPages: data.pagination.pages,
-          onPageChange: handlePageChange,
-          pageSize: data.pagination.limit,
-          onPageSizeChange: (size: number) =>
-            dispatch(setFilters({ limit: size, page: 1 })),
-          totalItems: data.pagination.total
-        }
-      : undefined,
-    responsive: {
-      showMobileView: true,
-      stickyHeader: true
-    }
+  const handleProjectFilter = (projectId: string) => {
+    dispatch(setFilters({ projectId: projectId || undefined, page: 1 }))
+  }
+
+  const handleAreaUnitFilter = (areaUnit: string) => {
+    dispatch(setFilters({ areaUnit: areaUnit || undefined, page: 1 }))
   }
 
   const summary = data?.summary
@@ -232,7 +165,7 @@ export default function PlotSizesPage () {
       <div>
         <h1 className='text-2xl font-bold text-foreground'>Plot Sizes</h1>
         <p className='mt-1 text-muted-foreground'>
-          Manage plot sizes, areas, and pricing
+          Manage plot sizes, areas, and pricing — grouped by project
         </p>
       </div>
 
@@ -302,13 +235,201 @@ export default function PlotSizesPage () {
         }
       />
 
-      <DataTable
-        data={data?.items || []}
-        config={tableConfig}
-        isLoading={isLoading}
-        onSearch={handleSearch}
-        onFilterChange={handleFilterChange}
-      />
+      <Card>
+        <CardHeader>
+          <CardTitle>All Plot Sizes</CardTitle>
+          <div className='flex flex-col sm:flex-row gap-3 pt-2'>
+            <div className='relative flex-1'>
+              <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
+              <Input
+                placeholder='Search...'
+                defaultValue={filters.search || ''}
+                onChange={e => handleSearch(e.target.value)}
+                className='pl-9'
+              />
+            </div>
+            <Select
+              value={filters.projectId || 'all'}
+              onValueChange={v => handleProjectFilter(v === 'all' ? '' : v)}
+            >
+              <SelectTrigger className='w-full sm:w-[200px]'>
+                <SelectValue placeholder='All Projects' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All Projects</SelectItem>
+                {projectOptions.map(p => (
+                  <SelectItem key={p.value} value={p.value}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={filters.areaUnit || 'all'}
+              onValueChange={v => handleAreaUnitFilter(v === 'all' ? '' : v)}
+            >
+              <SelectTrigger className='w-full sm:w-[160px]'>
+                <SelectValue placeholder='All Units' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All Units</SelectItem>
+                <SelectItem value='marla'>Marla</SelectItem>
+                <SelectItem value='sqft'>Square Feet</SelectItem>
+                <SelectItem value='sqm'>Square Meter</SelectItem>
+                <SelectItem value='acre'>Acre</SelectItem>
+                <SelectItem value='hectare'>Hectare</SelectItem>
+                <SelectItem value='kanal'>Kanal</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          {isLoading ? (
+            <p className='text-sm text-muted-foreground py-8 text-center'>
+              Loading...
+            </p>
+          ) : groupedByProject.length === 0 ? (
+            <p className='text-sm text-muted-foreground py-8 text-center'>
+              No plot sizes found.
+            </p>
+          ) : (
+            groupedByProject.map(group => {
+              const isCollapsed = collapsedProjectIds.has(group.projectId)
+              const totalValue = group.rows.reduce(
+                (sum, r) => sum + (r.standardBasePrice || 0),
+                0
+              )
+              const isRealProject = group.projectId !== 'unassigned'
+              return (
+                <div
+                  key={group.projectId}
+                  className='border rounded-lg overflow-hidden'
+                >
+                  <button
+                    type='button'
+                    onClick={() => toggleProject(group.projectId)}
+                    className='w-full flex items-center justify-between gap-3 px-4 py-3 bg-muted/40 hover:bg-muted/70 transition-colors text-left'
+                  >
+                    <div className='flex items-center gap-2 min-w-0'>
+                      {isCollapsed ? (
+                        <ChevronRight className='h-4 w-4 shrink-0 text-muted-foreground' />
+                      ) : (
+                        <ChevronDown className='h-4 w-4 shrink-0 text-muted-foreground' />
+                      )}
+                      {isRealProject ? (
+                        <Link
+                          href={`/projects/view/${group.projectId}`}
+                          onClick={e => e.stopPropagation()}
+                          className='font-semibold truncate hover:underline'
+                        >
+                          {group.projectName}
+                          {group.projectCode && (
+                            <span className='text-muted-foreground font-normal'>
+                              {' '}
+                              ({group.projectCode})
+                            </span>
+                          )}
+                        </Link>
+                      ) : (
+                        <span className='font-semibold truncate text-muted-foreground'>
+                          {group.projectName}
+                        </span>
+                      )}
+                    </div>
+                    <div className='flex items-center gap-2 shrink-0'>
+                      <Badge variant='outline'>
+                        {group.rows.length} size
+                        {group.rows.length !== 1 ? 's' : ''}
+                      </Badge>
+                      <Badge className='bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'>
+                        PKR {totalValue.toLocaleString()}
+                      </Badge>
+                    </div>
+                  </button>
+                  {!isCollapsed && (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Plot Size</TableHead>
+                          <TableHead>Area</TableHead>
+                          <TableHead className='text-right'>
+                            Rate/Unit
+                          </TableHead>
+                          <TableHead className='text-right'>
+                            Total Price
+                          </TableHead>
+                          {(canUpdate || canDelete) && (
+                            <TableHead className='text-right'>
+                              Actions
+                            </TableHead>
+                          )}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.rows.map(row => (
+                          <TableRow
+                            key={row._id}
+                            className='cursor-pointer'
+                            onClick={() => handleView(row._id)}
+                          >
+                            <TableCell className='font-medium'>
+                              {row.plotSizeName}
+                            </TableCell>
+                            <TableCell>
+                              <div className='flex items-center gap-2'>
+                                {row.totalArea} {row.areaUnit}
+                                <Badge variant='outline'>
+                                  {row.areaUnit.toUpperCase()}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                            <TableCell className='text-right'>
+                              {row.formattedRate ||
+                                `PKR ${row.ratePerUnit.toLocaleString()}`}
+                            </TableCell>
+                            <TableCell className='text-right font-bold text-green-700'>
+                              {row.formattedPrice ||
+                                `PKR ${row.standardBasePrice.toLocaleString()}`}
+                            </TableCell>
+                            {(canUpdate || canDelete) && (
+                              <TableCell
+                                className='text-right'
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <div className='flex justify-end gap-2'>
+                                  <ActionIcon
+                                    actionType='view'
+                                    onClick={() => handleView(row._id)}
+                                    title='View Details'
+                                  />
+                                  {canUpdate && (
+                                    <ActionIcon
+                                      actionType='edit'
+                                      onClick={() => handleEdit(row._id)}
+                                      title='Edit'
+                                    />
+                                  )}
+                                  {canDelete && (
+                                    <ActionIcon
+                                      actionType='delete'
+                                      onClick={() => handleDelete(row._id)}
+                                      title='Delete'
+                                    />
+                                  )}
+                                </div>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

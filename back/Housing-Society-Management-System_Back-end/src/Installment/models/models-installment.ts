@@ -240,7 +240,14 @@ const installmentSchema = new Schema<IInstallment>(
 );
 
 // Compound indexes for efficient querying
-installmentSchema.index({ fileId: 1, installmentNo: 1 });
+// installmentNo is a single global sequence per file (the plan generator
+// never resets it per category - see buildInstallmentRows), so this is a
+// genuine uniqueness rule, not just a query-performance index: it prevents
+// two installment rows from ever duplicating the same ledger position.
+installmentSchema.index(
+  { fileId: 1, installmentNo: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false }, name: 'uniq_installmentNo_per_file' }
+);
 installmentSchema.index({ status: 1, dueDate: 1 });
 installmentSchema.index({ dueDate: 1, isDeleted: 1 });
 installmentSchema.index({ installmentCategoryId: 1, status: 1 });
@@ -359,6 +366,24 @@ const calculateLateFee = (amountDue: number, daysOverdue: number): number => {
   return Math.min(calculatedFee, maxLateFee);
 };
 
+// Pre-validate middleware: totalPayable is required, but required-field
+// checks run before pre('save') hooks, so a brand-new document that omits it
+// gets rejected with "Total payable is required" before the pre('save')
+// calculation below ever runs. Fill in just totalPayable here, before
+// validation, only when missing - balanceAmount/status/lateFeeSurcharge stay
+// entirely in pre('save') below (unchanged), since those aren't required
+// fields and depend on today's date / amountPaid, not just validation
+// timing. pre('save') still unconditionally recomputes totalPayable too, so
+// this doesn't change the final persisted value on any path that already
+// goes through save().
+installmentSchema.pre('validate', function (next) {
+  const doc = this as any;
+  if (doc.totalPayable === undefined && doc.amountDue !== undefined) {
+    doc.totalPayable = doc.amountDue + (doc.lateFeeSurcharge || 0);
+  }
+  next();
+});
+
 // Pre-save middleware
 installmentSchema.pre('save', function (next) {
   const doc = this as any;
@@ -410,41 +435,19 @@ installmentSchema.pre('save', function (next) {
   next();
 });
 
-// Pre-update middleware
-installmentSchema.pre('findOneAndUpdate', function (next) {
-  const update = this.getUpdate() as any;
-
-  if (update) {
-    // If amount paid is being updated, recalculate balance and status
-    if (update.amountPaid !== undefined) {
-      const totalPayable = update.totalPayable || 0;
-      const amountPaid = update.amountPaid;
-
-      // Calculate balance
-      update.balanceAmount = totalPayable - amountPaid;
-
-      // Update status based on payment
-      if (amountPaid === 0) {
-        update.status = InstallmentStatus.UNPAID;
-      } else if (amountPaid >= totalPayable) {
-        update.status = InstallmentStatus.PAID;
-        update.balanceAmount = 0;
-        if (!update.paidDate) {
-          update.paidDate = new Date();
-        }
-      } else if (amountPaid > 0) {
-        update.status = InstallmentStatus.PARTIALLY_PAID;
-      }
-    }
-
-    // Set paid date if status changes to PAID
-    if (update.status === InstallmentStatus.PAID && !update.paidDate) {
-      update.paidDate = new Date();
-    }
-  }
-
-  next();
-});
+// There is deliberately no pre('findOneAndUpdate') hook recomputing
+// balance/status/paidDate here. installmentService.recordPayment (in
+// service-installment.ts) is the single place that changes amountPaid, and
+// it already computes balanceAmount/status/paidDate itself before writing.
+// A previous version of this file also had a hook that tried to do the same
+// computation here, reading `update.amountPaid` directly - but every caller
+// (recordPayment included) passes its update wrapped in `{ $set: {...} }`,
+// so `this.getUpdate().amountPaid` was always undefined and the hook's body
+// never actually ran. Rather than fix it to read `$set` and re-introduce a
+// second place that computes the same thing (which is exactly how it went
+// stale/wrong in the first place), payment math lives only in recordPayment.
+// If you add a new path that changes amountPaid, compute balance/status
+// there too - don't rely on a model hook to catch it.
 
 /**
  * Nests a member/plot populate under file instead of populating them

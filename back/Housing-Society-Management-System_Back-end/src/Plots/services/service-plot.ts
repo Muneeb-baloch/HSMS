@@ -1,5 +1,4 @@
 import { ClientSession, Types } from 'mongoose';
-import { toBaseSqft } from '../../common/utils/areaUnits';
 import SrDevStatusModel from '../../Development/models/models-srdevstatus';
 import File from '../../File/models/models-file';
 import Project from '../../Project/models/models-project';
@@ -90,15 +89,10 @@ export const plotService = {
     userId: Types.ObjectId,
     session?: ClientSession
   ): Promise<any> {
-    // Calculate plot area
-    const plotArea = parseFloat((data.plotLength * data.plotWidth).toFixed(2));
-
-    // Calculate total amount if not provided
-    let plotTotalAmount = data.plotTotalAmount;
-    if (!plotTotalAmount) {
-      plotTotalAmount =
-        data.plotBasePrice + (data.surchargeAmount || 0) - (data.discountAmount || 0);
-    }
+    // plotArea/areaBase/plotTotalAmount are computed by the Plot model itself
+    // (pre('validate') fills them in so the required-field check passes, then
+    // pre('save') unconditionally recalculates all three) - no need to
+    // precompute them here.
 
     // Validate that project and block exist
     const [project, plotBlock] = await Promise.all([
@@ -116,9 +110,6 @@ export const plotService = {
 
     const plotData = {
       ...data,
-      plotArea,
-      areaBase: toBaseSqft(plotArea, 'sqft'),
-      plotTotalAmount,
       plotType: data.plotType,
       projectId: new Types.ObjectId(data.projectId),
       plotBlockId: new Types.ObjectId(data.plotBlockId),

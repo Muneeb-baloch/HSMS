@@ -1,683 +1,434 @@
 import { Types } from 'mongoose';
-import File from '../../File/models/models-file';
-import Member from '../../Member/models/models-member';
-import Plot from '../../Plots/models/models-plot';
-import Defaulter, { DefaulterStatus } from '../models/models-defaulter';
+import BillInfo, { BillStatus } from '../../BillI/models/models-bill-info';
+import File, { FileStatus } from '../../File/models/models-file';
+import Installment, { InstallmentStatus } from '../../Installment/models/models-installment';
+import Society from '../../Society/models/models-society';
+import DefaulterWorkflow, { DefaulterStatus } from '../models/models-defaulter-workflow';
 import {
-  CreateDefaulterDto,
   DefaulterQueryParams,
+  DefaulterRow,
   DefaulterStatistics,
-  DefaulterType,
-  ResolveDefaulterDto,
   SendNoticeDto,
-  UpdateDefaulterDto,
 } from '../types/types-defaulter';
 
-// Helper function to convert Mongoose document to plain object
-const toPlainObject = (doc: any): DefaulterType => {
-  const plainObj = doc.toObject ? doc.toObject() : doc;
+const DEFAULT_THRESHOLD_DAYS = 30;
 
-  if (!plainObj.createdAt && doc.createdAt) {
-    plainObj.createdAt = doc.createdAt;
-  }
-  if (!plainObj.updatedAt && doc.updatedAt) {
-    plainObj.updatedAt = doc.updatedAt;
-  }
-
-  return plainObj as DefaulterType;
+type LedgerStat = {
+  oldestUnpaidDueDate: Date;
+  overdueAmount: number;
 };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Aggregates "still owed" rows (amountPaid < totalPayable, not cancelled)
+ * from a model, grouped by fileId. Used identically for Installment and
+ * BillInfo - see computeDefaulterRows for why amountPaid/totalPayable are
+ * used instead of matching specific status strings (status is cheap to let
+ * go stale, see Item 5; the two amount fields are always kept correct by
+ * recordPayment regardless of status).
+ */
+async function aggregateLedgerStats(
+  model: any,
+  excludedStatuses: string[],
+  extraMatch: Record<string, any>,
+  today: Date
+): Promise<Map<string, LedgerStat>> {
+  const rows = await model.aggregate([
+    {
+      $match: {
+        isDeleted: false,
+        status: { $nin: excludedStatuses },
+        $expr: { $lt: ['$amountPaid', '$totalPayable'] },
+        ...extraMatch,
+      },
+    },
+    {
+      $group: {
+        _id: '$fileId',
+        oldestUnpaidDueDate: { $min: '$dueDate' },
+        overdueAmount: {
+          $sum: {
+            $cond: [
+              { $lt: ['$dueDate', today] },
+              { $subtract: ['$totalPayable', '$amountPaid'] },
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+
+  return new Map(rows.map((r: any) => [String(r._id), { oldestUnpaidDueDate: r.oldestUnpaidDueDate, overdueAmount: r.overdueAmount }]));
+}
+
+function suggestStatus(daysOverdue: number): DefaulterStatus {
+  if (daysOverdue >= 180) return DefaulterStatus.LEGAL_ACTION;
+  if (daysOverdue >= 90) return DefaulterStatus.SUSPENDED;
+  return DefaulterStatus.WARNING;
+}
+
+/**
+ * Computes the full, unpaginated, ledger-derived defaulter list: every File
+ * whose oldest unpaid installment/bill due date is at least the owning
+ * society's defaulterThresholdDays in the past. Nothing here is read from a
+ * stored "defaulter" record - amounts, days overdue, and admission onto the
+ * list are all computed fresh from Installment/BillInfo every call. The only
+ * persisted state merged in is DefaulterWorkflow (staff override/notices/
+ * remarks), which doesn't affect whether a file qualifies.
+ *
+ * Also lazily auto-resolves: any DefaulterWorkflow without resolvedAt whose
+ * file's totalOverdue has reached 0 gets resolvedAt stamped here. This is
+ * the mechanism behind "drops off the list automatically" - the file simply
+ * stops appearing in the computed rows below once overdue hits 0, and this
+ * stamps the history record saying so.
+ */
+async function computeDefaulterRows(): Promise<DefaulterRow[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const [instStats, billStats] = await Promise.all([
+    aggregateLedgerStats(
+      Installment,
+      [InstallmentStatus.CANCELLED, InstallmentStatus.REFUNDED],
+      {},
+      today
+    ),
+    aggregateLedgerStats(BillInfo, [BillStatus.CANCELLED], { isActive: true }, today),
+  ]);
+
+  const fileIds = new Set([...instStats.keys(), ...billStats.keys()]);
+  if (fileIds.size === 0) {
+    await reconcileResolvedWorkflows(new Map());
+    return [];
+  }
+
+  const objectIds = [...fileIds].map(id => new Types.ObjectId(id));
+  const files = await File.find({
+    _id: { $in: objectIds },
+    isDeleted: false,
+    status: { $in: [FileStatus.ACTIVE, FileStatus.PENDING] },
+  })
+    .populate('memId', 'memName fullName memNic mobileNo')
+    .populate({ path: 'plotId', select: 'plotNo plotBlockId', populate: { path: 'plotBlockId', select: 'plotBlockName' } })
+    .lean();
+
+  const societyIds = [...new Set(files.map(f => String(f.societyId)))].map(
+    id => new Types.ObjectId(id)
+  );
+  const societies = await Society.find({ _id: { $in: societyIds } })
+    .select('settings.defaulterThresholdDays')
+    .lean();
+  const thresholdBySociety = new Map(
+    societies.map(s => [String(s._id), s.settings?.defaulterThresholdDays ?? DEFAULT_THRESHOLD_DAYS])
+  );
+
+  const workflows = await DefaulterWorkflow.find({ fileId: { $in: objectIds } }).lean();
+  const workflowByFileId = new Map(workflows.map(w => [String(w.fileId), w]));
+
+  // Merge per-file stats once so both row-building and the auto-resolve pass
+  // below use the exact same totals.
+  const mergedByFileId = new Map<
+    string,
+    { oldestUnpaidDueDate: Date; installmentsOverdue: number; billsOverdue: number }
+  >();
+  for (const fileId of fileIds) {
+    const inst = instStats.get(fileId);
+    const bill = billStats.get(fileId);
+    const candidates = [inst?.oldestUnpaidDueDate, bill?.oldestUnpaidDueDate].filter(
+      (d): d is Date => !!d
+    );
+    if (candidates.length === 0) continue;
+    mergedByFileId.set(fileId, {
+      oldestUnpaidDueDate: new Date(Math.min(...candidates.map(d => d.getTime()))),
+      installmentsOverdue: inst?.overdueAmount ?? 0,
+      billsOverdue: bill?.overdueAmount ?? 0,
+    });
+  }
+
+  await reconcileResolvedWorkflows(mergedByFileId);
+
+  const rows: DefaulterRow[] = [];
+  for (const file of files) {
+    const stats = mergedByFileId.get(String(file._id));
+    if (!stats) continue;
+
+    const threshold =
+      thresholdBySociety.get(String(file.societyId)) ?? DEFAULT_THRESHOLD_DAYS;
+    const daysOverdue = Math.max(
+      0,
+      Math.floor((today.getTime() - stats.oldestUnpaidDueDate.getTime()) / (1000 * 60 * 60 * 24))
+    );
+    if (daysOverdue < threshold) continue;
+
+    const installmentsOverdue = round2(stats.installmentsOverdue);
+    const billsOverdue = round2(stats.billsOverdue);
+    const totalOverdue = round2(installmentsOverdue + billsOverdue);
+    if (totalOverdue <= 0) continue;
+
+    const workflow = workflowByFileId.get(String(file._id));
+    const suggestedStatus = suggestStatus(daysOverdue);
+    const statusOverride = workflow?.statusOverride as DefaulterStatus | undefined;
+
+    rows.push({
+      fileId: file._id as Types.ObjectId,
+      file: { _id: file._id, fileRegNo: (file as any).fileRegNo, fileBarCode: (file as any).fileBarCode },
+      member: (file as any).memId,
+      plot: (file as any).plotId,
+      daysOverdue,
+      oldestUnpaidDueDate: stats.oldestUnpaidDueDate,
+      installmentsOverdue,
+      billsOverdue,
+      totalOverdue,
+      suggestedStatus,
+      statusOverride,
+      actualStatus: statusOverride ?? suggestedStatus,
+      noticeSentCount: workflow?.noticeSentCount ?? 0,
+      remarks: workflow?.remarks,
+      workflowId: workflow?._id as Types.ObjectId | undefined,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Stamps resolvedAt on any DefaulterWorkflow that doesn't have it yet but
+ * whose file no longer owes anything (not in currentOwedByFileId, or owes
+ * <= 0). Runs as a side effect of every list/stats read - see
+ * computeDefaulterRows's docstring.
+ */
+async function reconcileResolvedWorkflows(
+  currentOwedByFileId: Map<string, { installmentsOverdue: number; billsOverdue: number }>
+): Promise<void> {
+  const unresolved = await DefaulterWorkflow.find({ resolvedAt: { $exists: false } })
+    .select('_id fileId')
+    .lean();
+  if (unresolved.length === 0) return;
+
+  const toResolve = unresolved
+    .filter(w => {
+      const owed = currentOwedByFileId.get(String(w.fileId));
+      const total = (owed?.installmentsOverdue ?? 0) + (owed?.billsOverdue ?? 0);
+      return total <= 0;
+    })
+    .map(w => w._id);
+
+  if (toResolve.length > 0) {
+    await DefaulterWorkflow.updateMany(
+      { _id: { $in: toResolve } },
+      { $set: { resolvedAt: new Date() } }
+    );
+  }
+}
+
+function applyFilters(rows: DefaulterRow[], params: DefaulterQueryParams): DefaulterRow[] {
+  let filtered = rows;
+
+  if (params.status) {
+    filtered = filtered.filter(r => r.actualStatus === params.status);
+  }
+  if (params.minAmount !== undefined) {
+    filtered = filtered.filter(r => r.totalOverdue >= params.minAmount!);
+  }
+  if (params.maxAmount !== undefined) {
+    filtered = filtered.filter(r => r.totalOverdue <= params.maxAmount!);
+  }
+  if (params.minDays !== undefined) {
+    filtered = filtered.filter(r => r.daysOverdue >= params.minDays!);
+  }
+  if (params.maxDays !== undefined) {
+    filtered = filtered.filter(r => r.daysOverdue <= params.maxDays!);
+  }
+  if (params.search && params.search.trim()) {
+    const term = params.search.trim().toLowerCase();
+    filtered = filtered.filter(r => {
+      const memberName = (r.member?.memName || r.member?.fullName || '').toLowerCase();
+      const memberNic = (r.member?.memNic || '').toLowerCase();
+      const plotNo = (r.plot?.plotNo || '').toLowerCase();
+      const fileRegNo = (r.file?.fileRegNo || '').toLowerCase();
+      return (
+        memberName.includes(term) ||
+        memberNic.includes(term) ||
+        plotNo.includes(term) ||
+        fileRegNo.includes(term)
+      );
+    });
+  }
+
+  const sortBy = params.sortBy || 'daysOverdue';
+  const sortOrder = params.sortOrder === 'asc' ? 1 : -1;
+  filtered = [...filtered].sort((a, b) => (a[sortBy] - b[sortBy]) * sortOrder);
+
+  return filtered;
+}
 
 export const defaulterService = {
   /**
-   * Create new defaulter record
-   */
-  async createDefaulter(data: CreateDefaulterDto, userId: Types.ObjectId): Promise<DefaulterType> {
-    // Check if member exists
-    const member = await Member.findById(data.memId);
-    if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
-    }
-
-    // Check if plot exists
-    const plot = await Plot.findById(data.plotId);
-    if (!plot || (plot as any).isDeleted) {
-      throw new Error('Plot not found');
-    }
-
-    // Check if file exists
-    const file = await File.findById(data.fileId);
-    if (!file || (file as any).isDeleted) {
-      throw new Error('File not found');
-    }
-
-    // Check if defaulter already exists for this combination
-    const existingDefaulter = await Defaulter.findOne({
-      memId: data.memId,
-      plotId: data.plotId,
-      fileId: data.fileId,
-      isActive: true,
-    });
-
-    if (existingDefaulter) {
-      throw new Error(
-        'Defaulter record already exists for this member, plot, and file combination'
-      );
-    }
-
-    const defaulterData = {
-      ...data,
-      daysOverdue: data.lastPaymentDate
-        ? Math.ceil(
-            (new Date().getTime() - new Date(data.lastPaymentDate).getTime()) /
-              (1000 * 60 * 60 * 24)
-          )
-        : 0,
-      noticeSentCount: data.noticeSentCount || 0,
-      createdBy: userId,
-      isActive: true,
-    };
-
-    const defaulter = await Defaulter.create(defaulterData);
-
-    const createdDefaulter = await Defaulter.findById(defaulter._id)
-      .populate('memId', 'memName fullName memNic mobileNo email')
-      .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      })
-      .populate('fileId', 'fileRegNo fileBarCode')
-      .populate('createdBy', 'userName fullName designation');
-
-    if (!createdDefaulter) {
-      throw new Error('Failed to create defaulter record');
-    }
-
-    return toPlainObject(createdDefaulter);
-  },
-
-  /**
-   * Get defaulter by ID
-   */
-  async getDefaulterById(id: string): Promise<DefaulterType> {
-    try {
-      const defaulter = await Defaulter.findById(id)
-        .populate('memId', 'memName fullName memNic fatherName mobileNo email address')
-        .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: [
-          { path: 'plotBlockId', select: 'plotBlockName' },
-          { path: 'projectId', select: 'projName projCode' },
-        ],
-      })
-        .populate('fileId', 'fileRegNo fileBarCode bookingDate totalAmount')
-        .populate('createdBy', 'userName fullName designation')
-        .populate('modifiedBy', 'userName fullName designation');
-
-      if (!defaulter || !defaulter.isActive) {
-        throw new Error('Defaulter not found');
-      }
-
-      return toPlainObject(defaulter);
-    } catch (error) {
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Invalid defaulter ID');
-    }
-  },
-
-  /**
-   * Get all defaulters with pagination
+   * Get paginated, filtered, ledger-derived defaulter list.
    */
   async getDefaulters(params: DefaulterQueryParams): Promise<{
-    defaulters: DefaulterType[];
+    defaulters: DefaulterRow[];
     pagination: { page: number; limit: number; total: number; pages: number };
   }> {
-    const {
-      page = 1,
-      limit = 20,
-      search,
-      memId,
-      plotId,
-      fileId,
-      status,
-      minAmount,
-      maxAmount,
-      minDays,
-      maxDays,
-      isActive = true,
-      sortBy = 'daysOverdue',
-      sortOrder = 'desc',
-    } = params;
+    const page = params.page || 1;
+    const limit = params.limit || 20;
 
-    const skip = (page - 1) * limit;
-    const sort: Record<string, 1 | -1> = {
-      [sortBy]: sortOrder === 'asc' ? 1 : -1,
-    };
+    const allRows = await computeDefaulterRows();
+    const filtered = applyFilters(allRows, params);
 
-    // Build query
-    const query: any = { isActive };
-
-    if (search && search.trim()) {
-      const term = search.trim();
-      const idsFromLookup = await Defaulter.aggregate([
-        { $match: { isActive } },
-        {
-          $lookup: {
-            from: 'members',
-            localField: 'memId',
-            foreignField: '_id',
-            as: 'mem',
-            pipeline: [
-              {
-                $match: {
-                  $or: [
-                    { memName: { $regex: term, $options: 'i' } },
-                    { fullName: { $regex: term, $options: 'i' } },
-                    { memNic: { $regex: term, $options: 'i' } },
-                  ],
-                },
-              },
-            ],
-          },
-        },
-        {
-          $lookup: {
-            from: 'plots',
-            localField: 'plotId',
-            foreignField: '_id',
-            as: 'plt',
-            pipeline: [{ $match: { plotNo: { $regex: term, $options: 'i' } } }],
-          },
-        },
-        {
-          $lookup: {
-            from: 'files',
-            localField: 'fileId',
-            foreignField: '_id',
-            as: 'fl',
-            pipeline: [
-              {
-                $match: {
-                  $or: [
-                    { fileRegNo: { $regex: term, $options: 'i' } },
-                    { fileBarCode: { $regex: term, $options: 'i' } },
-                  ],
-                },
-              },
-            ],
-          },
-        },
-        {
-          $match: {
-            $or: [
-              { 'mem.0': { $exists: true } },
-              { 'plt.0': { $exists: true } },
-              { 'fl.0': { $exists: true } },
-            ],
-          },
-        },
-        { $project: { _id: 1 } },
-      ]);
-      const ids = idsFromLookup.map((d: any) => d._id);
-      if (ids.length > 0) {
-        query.$or = [{ _id: { $in: ids } }, { remarks: { $regex: term, $options: 'i' } }];
-      } else {
-        query.remarks = { $regex: term, $options: 'i' };
-      }
-    }
-
-    if (memId) {
-      query.memId = new Types.ObjectId(memId);
-    }
-
-    if (plotId) {
-      query.plotId = new Types.ObjectId(plotId);
-    }
-
-    if (fileId) {
-      query.fileId = new Types.ObjectId(fileId);
-    }
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (minAmount !== undefined || maxAmount !== undefined) {
-      query.totalOverdueAmount = {};
-      if (minAmount !== undefined) query.totalOverdueAmount.$gte = minAmount;
-      if (maxAmount !== undefined) query.totalOverdueAmount.$lte = maxAmount;
-    }
-
-    if (minDays !== undefined || maxDays !== undefined) {
-      query.daysOverdue = {};
-      if (minDays !== undefined) query.daysOverdue.$gte = minDays;
-      if (maxDays !== undefined) query.daysOverdue.$lte = maxDays;
-    }
-
-    const [defaulters, total] = await Promise.all([
-      Defaulter.find(query)
-        .populate('memId', 'memName fullName memNic mobileNo')
-        .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      })
-        .populate('fileId', 'fileRegNo fileBarCode')
-        .skip(skip)
-        .limit(limit)
-        .sort(sort)
-        .then(docs => docs.map(doc => toPlainObject(doc))),
-      Defaulter.countDocuments(query),
-    ]);
+    const total = filtered.length;
+    const start = (page - 1) * limit;
+    const defaulters = filtered.slice(start, start + limit);
 
     return {
       defaulters,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     };
   },
 
   /**
-   * Update defaulter
+   * Get a single file's defaulter row. Throws if the file isn't currently a
+   * defaulter (e.g. already resolved, or never was one).
    */
-  async updateDefaulter(
-    id: string,
-    data: UpdateDefaulterDto,
+  async getDefaulterByFileId(fileId: string): Promise<DefaulterRow> {
+    const rows = await computeDefaulterRows();
+    const row = rows.find(r => String(r.fileId) === fileId);
+    if (!row) {
+      throw new Error('File is not currently a defaulter');
+    }
+    return row;
+  },
+
+  /**
+   * Set (or clear, with status: null) the staff status override for a file.
+   */
+  async setStatusOverride(
+    fileId: string,
+    status: DefaulterStatus | null,
     userId: Types.ObjectId
-  ): Promise<DefaulterType | null> {
-    const existingDefaulter = await Defaulter.findById(id);
-    if (!existingDefaulter || !existingDefaulter.isActive) {
-      throw new Error('Defaulter not found');
+  ): Promise<DefaulterRow> {
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
     }
 
-    const updateObj: any = {
-      ...data,
-      modifiedBy: userId,
-    };
-
-    // If marking as resolved, set resolvedAt
-    if (
-      data.status === DefaulterStatus.RESOLVED &&
-      existingDefaulter.status !== DefaulterStatus.RESOLVED
-    ) {
-      updateObj.resolvedAt = new Date();
-    }
-
-    const defaulter = await Defaulter.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true, runValidators: true }
-    )
-      .populate('memId', 'memName fullName memNic mobileNo')
-      .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      })
-      .populate('fileId', 'fileRegNo fileBarCode')
-      .populate('modifiedBy', 'userName fullName');
-
-    return defaulter ? toPlainObject(defaulter) : null;
-  },
-
-  /**
-   * Delete defaulter (soft delete)
-   */
-  async deleteDefaulter(id: string, userId: Types.ObjectId): Promise<boolean> {
-    const existingDefaulter = await Defaulter.findById(id);
-    if (!existingDefaulter || !existingDefaulter.isActive) {
-      throw new Error('Defaulter not found');
-    }
-
-    const result = await Defaulter.findByIdAndUpdate(
-      id,
+    await DefaulterWorkflow.findOneAndUpdate(
+      { fileId: new Types.ObjectId(fileId) },
       {
         $set: {
-          isActive: false,
+          statusOverride: status ?? undefined,
+          societyId: file.societyId,
           modifiedBy: userId,
         },
+        $unset: status ? {} : { statusOverride: '' },
+        $setOnInsert: { createdBy: userId, noticeSentCount: 0 },
       },
-      { new: true }
+      { upsert: true, new: true, runValidators: true }
     );
 
-    return !!result;
+    return this.getDefaulterByFileId(fileId);
   },
 
   /**
-   * Get defaulters by member
+   * Set remarks for a file's defaulter workflow.
    */
-  async getDefaultersByMember(memId: string, activeOnly: boolean = true): Promise<DefaulterType[]> {
-    const defaulters = await Defaulter.find({
-      memId: new Types.ObjectId(memId),
-      ...(activeOnly && { isActive: true }),
-    })
-      .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      })
-      .populate('fileId', 'fileRegNo fileBarCode')
-      .sort({ daysOverdue: -1 })
-      .then(docs => docs.map(doc => toPlainObject(doc)));
+  async setRemarks(fileId: string, remarks: string, userId: Types.ObjectId): Promise<DefaulterRow> {
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
+    }
 
-    return defaulters;
+    await DefaulterWorkflow.findOneAndUpdate(
+      { fileId: new Types.ObjectId(fileId) },
+      {
+        $set: { remarks, societyId: file.societyId, modifiedBy: userId },
+        $setOnInsert: { createdBy: userId, noticeSentCount: 0 },
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
+
+    return this.getDefaulterByFileId(fileId);
   },
 
   /**
-   * Get defaulters by plot
-   */
-  async getDefaultersByPlot(plotId: string, activeOnly: boolean = true): Promise<DefaulterType[]> {
-    const defaulters = await Defaulter.find({
-      plotId: new Types.ObjectId(plotId),
-      ...(activeOnly && { isActive: true }),
-    })
-      .populate('memId', 'memName fullName memNic mobileNo')
-      .populate('fileId', 'fileRegNo fileBarCode')
-      .sort({ totalOverdueAmount: -1 })
-      .then(docs => docs.map(doc => toPlainObject(doc)));
-
-    return defaulters;
-  },
-
-  /**
-   * Send notice to defaulter
+   * Record that a notice was sent, incrementing noticeSentCount. FINAL/LEGAL
+   * notices also bump the status override, same as the old sendNotice did.
    */
   async sendNotice(
-    id: string,
+    fileId: string,
     data: SendNoticeDto,
     userId: Types.ObjectId
-  ): Promise<DefaulterType | null> {
-    const defaulter = await Defaulter.findById(id);
-    if (!defaulter || !defaulter.isActive) {
-      throw new Error('Defaulter not found');
+  ): Promise<DefaulterRow> {
+    const file = await File.findById(fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
     }
 
-    // Increment notice count
-    const updateObj = {
-      $inc: { noticeSentCount: 1 },
+    const existing = await DefaulterWorkflow.findOne({ fileId: new Types.ObjectId(fileId) });
+    const newCount = (existing?.noticeSentCount ?? 0) + 1;
+
+    const setObj: any = {
+      noticeSentCount: newCount,
+      societyId: file.societyId,
       modifiedBy: userId,
     };
-
-    // Update status based on notice type
-    if (data.noticeType === 'FINAL' && defaulter.noticeSentCount >= 2) {
-      (updateObj as any).status = DefaulterStatus.SUSPENDED;
+    if (data.noticeType === 'FINAL' && newCount >= 2) {
+      setObj.statusOverride = DefaulterStatus.SUSPENDED;
     } else if (data.noticeType === 'LEGAL') {
-      (updateObj as any).status = DefaulterStatus.LEGAL_ACTION;
+      setObj.statusOverride = DefaulterStatus.LEGAL_ACTION;
     }
 
-    const updatedDefaulter = await Defaulter.findByIdAndUpdate(id, updateObj, { new: true })
-      .populate('memId', 'memName fullName memNic mobileNo email')
-      .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      });
-
-    return updatedDefaulter ? toPlainObject(updatedDefaulter) : null;
-  },
-
-  /**
-   * Resolve defaulter (record payment)
-   */
-  async resolveDefaulter(
-    id: string,
-    data: ResolveDefaulterDto,
-    userId: Types.ObjectId
-  ): Promise<DefaulterType | null> {
-    const defaulter = await Defaulter.findById(id);
-    if (!defaulter || !defaulter.isActive) {
-      throw new Error('Defaulter not found');
-    }
-
-    const updateObj: any = {
-      totalOverdueAmount: Math.max(0, defaulter.totalOverdueAmount - data.paymentAmount),
-      lastPaymentDate: data.paymentDate,
-      modifiedBy: userId,
-      remarks: data.remarks || defaulter.remarks,
-    };
-
-    // If fully paid, mark as resolved
-    if (updateObj.totalOverdueAmount === 0) {
-      updateObj.status = DefaulterStatus.RESOLVED;
-      updateObj.resolvedAt = new Date();
-    }
-
-    const updatedDefaulter = await Defaulter.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true }
-    )
-      .populate('memId', 'memName fullName memNic mobileNo')
-      .populate({
-        path: 'plotId',
-        select: 'plotNo plotArea plotDimensions',
-        populate: { path: 'plotBlockId', select: 'plotBlockName' },
-      })
-      .populate('fileId', 'fileRegNo fileBarCode');
-
-    return updatedDefaulter ? toPlainObject(updatedDefaulter) : null;
-  },
-
-  /**
-   * Get defaulter statistics
-   */
-  async getDefaulterStatistics(): Promise<DefaulterStatistics> {
-    const [statusStats, totalStats, topDefaulters] = await Promise.all([
-      Defaulter.aggregate([
-        {
-          $match: { isActive: true },
-        },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 },
-            totalAmount: { $sum: '$totalOverdueAmount' },
-            avgDays: { $avg: '$daysOverdue' },
-          },
-        },
-      ]),
-      Defaulter.aggregate([
-        {
-          $match: { isActive: true },
-        },
-        {
-          $group: {
-            _id: null,
-            totalDefaulters: { $sum: 1 },
-            totalOverdueAmount: { $sum: '$totalOverdueAmount' },
-            averageOverdueAmount: { $avg: '$totalOverdueAmount' },
-            averageDaysOverdue: { $avg: '$daysOverdue' },
-          },
-        },
-      ]),
-      Defaulter.aggregate([
-        {
-          $match: { isActive: true },
-        },
-        {
-          $lookup: {
-            from: 'members',
-            localField: 'memId',
-            foreignField: '_id',
-            as: 'member',
-          },
-        },
-        {
-          $unwind: '$member',
-        },
-        {
-          $group: {
-            _id: '$memId',
-            fullName: { $first: '$member.fullName' },
-            totalAmount: { $sum: '$totalOverdueAmount' },
-            maxDaysOverdue: { $max: '$daysOverdue' },
-            defaulterCount: { $sum: 1 },
-          },
-        },
-        {
-          $sort: { totalAmount: -1 },
-        },
-        {
-          $limit: 10,
-        },
-      ]),
-    ]);
-
-    const noticeStats = await Defaulter.aggregate([
-      {
-        $match: { isActive: true },
-      },
-      {
-        $group: {
-          _id: '$noticeSentCount',
-          count: { $sum: 1 },
-          totalAmount: { $sum: '$totalOverdueAmount' },
-        },
-      },
-      {
-        $sort: { _id: 1 },
-      },
-    ]);
-
-    const byStatus: Record<string, number> = {};
-    statusStats.forEach(stat => {
-      byStatus[stat._id] = stat.count;
-    });
-
-    const byNoticeCount: Record<string, number> = {};
-    noticeStats.forEach(stat => {
-      byNoticeCount[`${stat._id} notices`] = stat.count;
-    });
-
-    const totalData = totalStats[0] || {
-      totalDefaulters: 0,
-      totalOverdueAmount: 0,
-      averageOverdueAmount: 0,
-      averageDaysOverdue: 0,
-    };
-
-    const activeDefaulters = await Defaulter.countDocuments({ isActive: true });
-
-    return {
-      totalDefaulters: totalData.totalDefaulters,
-      activeDefaulters,
-      byStatus,
-      totalOverdueAmount: totalData.totalOverdueAmount,
-      averageOverdueAmount: totalData.averageOverdueAmount,
-      averageDaysOverdue: totalData.averageDaysOverdue,
-      topDefaulters: topDefaulters.map(item => ({
-        memId: item._id,
-        memName: item.memName,
-        totalAmount: item.totalAmount,
-        daysOverdue: item.maxDaysOverdue,
-        defaulterCount: item.defaulterCount,
-      })),
-      byNoticeCount,
-    };
-  },
-
-  /**
-   * Bulk update defaulter status
-   */
-  async bulkUpdateStatus(
-    defaulterIds: string[],
-    status: DefaulterStatus,
-    userId: Types.ObjectId
-  ): Promise<{ matched: number; modified: number }> {
-    const objectIds = defaulterIds.map(id => {
-      try {
-        return new Types.ObjectId(id);
-      } catch (error) {
-        throw new Error(`Invalid defaulter ID: ${id}`);
-      }
-    });
-
-    const updateObj: any = {
-      status,
-      modifiedBy: userId,
-    };
-
-    // If resolving, set resolvedAt
-    if (status === DefaulterStatus.RESOLVED) {
-      updateObj.resolvedAt = new Date();
-    }
-
-    const result = await Defaulter.updateMany(
-      {
-        _id: { $in: objectIds },
-        isActive: true,
-      },
-      {
-        $set: updateObj,
-      }
+    await DefaulterWorkflow.findOneAndUpdate(
+      { fileId: new Types.ObjectId(fileId) },
+      { $set: setObj, $setOnInsert: { createdBy: userId } },
+      { upsert: true, new: true, runValidators: true }
     );
 
-    return {
-      matched: result.matchedCount,
-      modified: result.modifiedCount,
-    };
+    return this.getDefaulterByFileId(fileId);
   },
 
   /**
-   * Get overdue summary (for dashboard)
+   * Aggregate statistics over the live defaulter list.
    */
-  async getOverdueSummary(): Promise<{
-    totalAmount: number;
-    byStatus: Array<{ status: string; amount: number; count: number }>;
-    byDaysRange: Array<{ range: string; amount: number; count: number }>;
-  }> {
-    const [statusSummary, daysSummary] = await Promise.all([
-      Defaulter.aggregate([
-        {
-          $match: { isActive: true },
-        },
-        {
-          $group: {
-            _id: '$status',
-            totalAmount: { $sum: '$totalOverdueAmount' },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
-      Defaulter.aggregate([
-        {
-          $match: { isActive: true },
-        },
-        {
-          $bucket: {
-            groupBy: '$daysOverdue',
-            boundaries: [0, 30, 60, 90, 180, 365],
-            default: '365+',
-            output: {
-              totalAmount: { $sum: '$totalOverdueAmount' },
-              count: { $sum: 1 },
-            },
-          },
-        },
-      ]),
-    ]);
+  async getDefaulterStatistics(): Promise<DefaulterStatistics> {
+    const rows = await computeDefaulterRows();
 
-    const totalAmount = statusSummary.reduce((sum, item) => sum + item.totalAmount, 0);
+    const byStatus: Record<string, number> = {};
+    let totalOverdueAmount = 0;
+    let totalInstallmentsOverdue = 0;
+    let totalBillsOverdue = 0;
+    let totalDays = 0;
+
+    for (const row of rows) {
+      byStatus[row.actualStatus] = (byStatus[row.actualStatus] || 0) + 1;
+      totalOverdueAmount += row.totalOverdue;
+      totalInstallmentsOverdue += row.installmentsOverdue;
+      totalBillsOverdue += row.billsOverdue;
+      totalDays += row.daysOverdue;
+    }
+
+    const topDefaulters = [...rows]
+      .sort((a, b) => b.totalOverdue - a.totalOverdue)
+      .slice(0, 10)
+      .map(r => ({
+        fileId: r.fileId,
+        fileRegNo: r.file?.fileRegNo,
+        memberName: r.member?.memName || r.member?.fullName,
+        totalOverdue: r.totalOverdue,
+        daysOverdue: r.daysOverdue,
+      }));
 
     return {
-      totalAmount,
-      byStatus: statusSummary.map(item => ({
-        status: item._id,
-        amount: item.totalAmount,
-        count: item.count,
-      })),
-      byDaysRange: daysSummary.map(item => ({
-        range: `${item._id} days`,
-        amount: item.totalAmount,
-        count: item.count,
-      })),
+      totalDefaulters: rows.length,
+      byStatus,
+      totalOverdueAmount: round2(totalOverdueAmount),
+      totalInstallmentsOverdue: round2(totalInstallmentsOverdue),
+      totalBillsOverdue: round2(totalBillsOverdue),
+      averageOverdueAmount: rows.length ? round2(totalOverdueAmount / rows.length) : 0,
+      averageDaysOverdue: rows.length ? Math.round(totalDays / rows.length) : 0,
+      topDefaulters,
     };
   },
 };

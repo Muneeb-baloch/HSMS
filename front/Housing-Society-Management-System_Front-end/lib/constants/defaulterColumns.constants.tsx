@@ -1,6 +1,6 @@
 import { TableColumn } from "@/components/shared/DataTable/DataTable";
 import { Badge } from "@/components/ui/badge";
-import { Defaulter } from "@/lib/types/defaulter";
+import { DefaulterRow } from "@/lib/types/defaulter";
 import { formatDate } from "@/lib/utils/format";
 import { formatCurrency } from "@/lib/utils/format";
 
@@ -11,19 +11,17 @@ const statusColors: Record<string, string> = {
   Resolved: "bg-green-100 text-green-800",
 };
 
-export const defaulterColumns: TableColumn<Defaulter>[] = [
+export const defaulterColumns: TableColumn<DefaulterRow>[] = [
   {
     id: "member",
     header: "Member",
     cell: (row) => {
-      const member =
-        typeof row.memId === "object" ? row.memId : null;
-      const name = member?.memName || member?.fullName || "—";
+      const name = row.member?.memName || row.member?.fullName || "—";
       return (
         <div>
           <div className="font-medium">{name}</div>
-          {member?.memNic && (
-            <div className="text-sm text-gray-500">{member.memNic}</div>
+          {row.member?.memNic && (
+            <div className="text-sm text-gray-500">{row.member.memNic}</div>
           )}
         </div>
       );
@@ -33,89 +31,78 @@ export const defaulterColumns: TableColumn<Defaulter>[] = [
   {
     id: "plot",
     header: "Plot",
-    cell: (row) => {
-      const plot = typeof row.plotId === "object" ? row.plotId : null;
-      const block =
-        plot?.plotBlockId && typeof plot.plotBlockId === "object"
-          ? plot.plotBlockId.plotBlockName
-          : null;
-      return (
-        <div>
-          <div className="font-medium">{plot?.plotNo || "—"}</div>
-          {block && (
-            <div className="text-sm text-gray-500">{block}</div>
-          )}
-        </div>
-      );
-    },
+    cell: (row) => (
+      <div>
+        <div className="font-medium">{row.plot?.plotNo || "—"}</div>
+        {row.plot?.plotBlockId?.plotBlockName && (
+          <div className="text-sm text-gray-500">{row.plot.plotBlockId.plotBlockName}</div>
+        )}
+      </div>
+    ),
     width: "100",
   },
   {
-    id: "totalOverdueAmount",
-    header: "Amount",
-    accessorKey: "totalOverdueAmount",
-    cell: (row) => (
-      <div className="font-medium">
-        {formatCurrency(row.totalOverdueAmount)}
-      </div>
-    ),
+    id: "fileRegNo",
+    header: "File",
+    cell: (row) => <div className="text-sm">{row.file?.fileRegNo || "—"}</div>,
     width: "120",
+  },
+  {
+    id: "installmentsOverdue",
+    header: "Installments Overdue",
+    accessorKey: "installmentsOverdue",
+    cell: (row) => <div>{formatCurrency(row.installmentsOverdue)}</div>,
+    width: "130",
+  },
+  {
+    id: "billsOverdue",
+    header: "Bills Overdue",
+    accessorKey: "billsOverdue",
+    cell: (row) => <div>{formatCurrency(row.billsOverdue)}</div>,
+    width: "120",
+  },
+  {
+    id: "totalOverdue",
+    header: "Total Overdue",
+    accessorKey: "totalOverdue",
+    sortable: true,
+    cell: (row) => <div className="font-medium">{formatCurrency(row.totalOverdue)}</div>,
+    width: "130",
   },
   {
     id: "status",
     header: "Status",
-    accessorKey: "status",
     cell: (row) => (
-      <Badge
-        className={
-          statusColors[row.status] || "bg-gray-100 text-gray-800"
-        }
-      >
-        {row.status}
-      </Badge>
+      <div className="flex flex-col gap-1">
+        <Badge className={statusColors[row.actualStatus] || "bg-gray-100 text-gray-800"}>
+          {row.actualStatus}
+        </Badge>
+        {row.statusOverride && row.statusOverride !== row.suggestedStatus && (
+          <span className="text-xs text-gray-500">suggested: {row.suggestedStatus}</span>
+        )}
+      </div>
     ),
-    width: "110",
+    width: "140",
   },
   {
     id: "daysOverdue",
-    header: "Overdue Days",
+    header: "Days Overdue",
     accessorKey: "daysOverdue",
-    cell: (row) => (
-      <div className="font-medium">{row.daysOverdue}</div>
-    ),
+    sortable: true,
+    cell: (row) => <div className="font-medium">{row.daysOverdue}</div>,
     width: "100",
   },
   {
     id: "noticeSentCount",
-    header: "Notice Sent",
+    header: "Notices Sent",
     accessorKey: "noticeSentCount",
-    cell: (row) => (
-      <div className="text-sm">{row.noticeSentCount}</div>
-    ),
+    cell: (row) => <div className="text-sm">{row.noticeSentCount}</div>,
     width: "90",
   },
   {
-    id: "createdBy",
-    header: "Assigned To",
-    cell: (row) => {
-      const user =
-        typeof row.createdBy === "object" ? row.createdBy : null;
-      return (
-        <div className="text-sm">
-          {user?.fullName || user?.userName || "—"}
-        </div>
-      );
-    },
-    width: "120",
-  },
-  {
-    id: "createdAt",
-    header: "Created At",
-    accessorKey: "createdAt",
-    sortable: true,
-    cell: (row) => (
-      <div className="text-sm">{formatDate(row.createdAt)}</div>
-    ),
+    id: "oldestUnpaidDueDate",
+    header: "Overdue Since",
+    cell: (row) => <div className="text-sm">{formatDate(row.oldestUnpaidDueDate)}</div>,
     width: "110",
   },
 ];

@@ -406,27 +406,38 @@ export function startInstallmentCron(): void {
       }
     );
 
-    // Schedule overdue marking job (daily at 1am by default)
-    overdueTask = cron.schedule(
-      CRON_CONFIG.OVERDUE_SCHEDULE,
-      async () => {
-        logger.info('[InstallmentCron] Running scheduled overdue marking...');
-        try {
-          const updated = await markOverdueInstallments();
-          logger.info(`[InstallmentCron] Scheduled overdue marking complete: ${updated} updated`);
-        } catch (error) {
-          logger.error('[InstallmentCron] Scheduled overdue marking failed:', error);
+    // Overdue marking job (daily at 1am by default) - deliberately NOT
+    // scheduled unless explicitly opted in via ENABLE_OVERDUE_CRON=true.
+    // It writes real money fields (lateFeeSurcharge/totalPayable/
+    // balanceAmount) with no prior dry-run validation of what it would
+    // change on this dataset - do not flip this on without a dry run
+    // reviewed and approved first.
+    if (process.env.ENABLE_OVERDUE_CRON === 'true') {
+      overdueTask = cron.schedule(
+        CRON_CONFIG.OVERDUE_SCHEDULE,
+        async () => {
+          logger.info('[InstallmentCron] Running scheduled overdue marking...');
+          try {
+            const updated = await markOverdueInstallments();
+            logger.info(`[InstallmentCron] Scheduled overdue marking complete: ${updated} updated`);
+          } catch (error) {
+            logger.error('[InstallmentCron] Scheduled overdue marking failed:', error);
+          }
+        },
+        {
+          timezone: process.env.TZ || 'Asia/Karachi',
         }
-      },
-      {
-        timezone: process.env.TZ || 'Asia/Karachi',
-      }
-    );
+      );
+      logger.info(`[InstallmentCron] Overdue marking scheduled: "${CRON_CONFIG.OVERDUE_SCHEDULE}"`);
+    } else {
+      logger.info(
+        '[InstallmentCron] Overdue marking NOT scheduled (set ENABLE_OVERDUE_CRON=true to enable, after a reviewed dry run)'
+      );
+    }
 
     logger.info(
       `[InstallmentCron] Cron jobs started successfully. ` +
-        `Installment generation: "${CRON_CONFIG.INSTALLMENT_SCHEDULE}", ` +
-        `Overdue marking: "${CRON_CONFIG.OVERDUE_SCHEDULE}"`
+        `Installment generation: "${CRON_CONFIG.INSTALLMENT_SCHEDULE}"`
     );
   } catch (error) {
     logger.error('[InstallmentCron] Failed to start cron jobs:', error);

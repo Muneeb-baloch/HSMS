@@ -5,41 +5,25 @@ import { EnhancedDataTable as DataTable } from "@/components/shared/DataTable/Da
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SummaryCard } from "@/components/shared/SummaryCard";
-import { DeleteDefaulterDialog } from "@/components/defaulter/DeleteDefaulterDialog";
-import { ResolveDefaulterDialog } from "@/components/defaulter/ResolveDefaulterDialog";
 import { SendNoticeDialog } from "@/components/defaulter/SendNoticeDialog";
 import { defaulterColumns } from "@/lib/constants/defaulterColumns.constants";
 import { hasPermission, UserRole } from "@/lib/constants/roles";
 import {
   useDefaulters,
   useDefaulterStatistics,
-  useDeleteDefaulter,
   useSendNotice,
-  useResolveDefaulter,
 } from "@/lib/hooks/entities/useDefaulter";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useAppDispatch, useAppSelector } from "@/lib/store/hooks";
 import { resetFilters, setFilters } from "@/lib/store/slices/defaulterSlice";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Download,
-  DollarSign,
-  Mail,
-  Plus,
-  RefreshCw,
-  Trash2,
-  UserX,
-} from "lucide-react";
+import { AlertCircle, Download, DollarSign, Mail, RefreshCw, UserX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Defaulter } from "@/lib/types/defaulter";
+import { DefaulterRow } from "@/lib/types/defaulter";
 import { formatCurrency } from "@/lib/utils/format";
 
-function getMemberName(memId: Defaulter["memId"]): string {
-  if (!memId || typeof memId === "string") return "—";
-  return (memId as { memName?: string; fullName?: string }).memName ||
-    (memId as { fullName?: string }).fullName || "—";
+function getMemberName(row: DefaulterRow | null): string {
+  return row?.member?.memName || row?.member?.fullName || "—";
 }
 
 export function DefaulterList() {
@@ -48,52 +32,24 @@ export function DefaulterList() {
   const router = useRouter();
   const filters = useAppSelector((state) => state.defaulters?.filters || {});
   const [searchValue, setSearchValue] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const [deleteDialog, setDeleteDialog] = useState<{
-    open: boolean;
-    row: Defaulter | null;
-  }>({ open: false, row: null });
   const [sendNoticeDialog, setSendNoticeDialog] = useState<{
     open: boolean;
-    row: Defaulter | null;
-  }>({ open: false, row: null });
-  const [resolveDialog, setResolveDialog] = useState<{
-    open: boolean;
-    row: Defaulter | null;
+    row: DefaulterRow | null;
   }>({ open: false, row: null });
 
   const { data, isLoading } = useDefaulters(filters);
   const { data: statistics } = useDefaulterStatistics();
-  const deleteMutation = useDeleteDefaulter();
   const sendNoticeMutation = useSendNotice();
-  const resolveMutation = useResolveDefaulter();
 
-  const canCreate =
-    user &&
-    hasPermission(user.role as UserRole, [UserRole.ADMIN, UserRole.SUPER_ADMIN]);
   const canUpdate =
     user &&
     hasPermission(user.role as UserRole, [UserRole.ADMIN, UserRole.SUPER_ADMIN]);
-  const canDelete =
-    user &&
-    hasPermission(user.role as UserRole, [UserRole.ADMIN, UserRole.SUPER_ADMIN]);
 
-  const handleCreate = () => router.push("/defaulter/create");
-  const handleEdit = (id: string) => router.push(`/defaulter/edit/${id}`);
-  const handleView = (id: string) => router.push(`/defaulter/view/${id}`);
+  const handleView = (fileId: string) => router.push(`/defaulter/view/${fileId}`);
 
-  const handleDeleteClick = (row: Defaulter) => {
-    if (canDelete) setDeleteDialog({ open: true, row });
-  };
-  const handleDeleteConfirm = async () => {
-    if (!deleteDialog.row) return;
-    await deleteMutation.mutateAsync(deleteDialog.row._id);
-  };
-
-  const handleSendNoticeClick = (row: Defaulter) => {
-    if (row.status !== "Resolved" && canUpdate)
-      setSendNoticeDialog({ open: true, row });
+  const handleSendNoticeClick = (row: DefaulterRow) => {
+    if (canUpdate) setSendNoticeDialog({ open: true, row });
   };
   const handleSendNoticeSubmit = async (data: {
     noticeType: "WARNING" | "FINAL" | "LEGAL";
@@ -102,24 +58,7 @@ export function DefaulterList() {
   }) => {
     if (!sendNoticeDialog.row) return;
     await sendNoticeMutation.mutateAsync({
-      id: sendNoticeDialog.row._id,
-      data,
-    });
-  };
-
-  const handleResolveClick = (row: Defaulter) => {
-    if (row.status !== "Resolved" && canUpdate)
-      setResolveDialog({ open: true, row });
-  };
-  const handleResolveSubmit = async (data: {
-    paymentAmount: number;
-    paymentDate: string | Date;
-    paymentMethod: string;
-    remarks?: string;
-  }) => {
-    if (!resolveDialog.row) return;
-    await resolveMutation.mutateAsync({
-      id: resolveDialog.row._id,
+      fileId: sendNoticeDialog.row.fileId,
       data,
     });
   };
@@ -141,22 +80,6 @@ export function DefaulterList() {
     }
   };
 
-  const handleMemberFilter = (memId: string) => {
-    if (memId === "all") {
-      dispatch(setFilters({ memId: undefined, page: 1 }));
-    } else {
-      dispatch(setFilters({ memId, page: 1 }));
-    }
-  };
-
-  const handlePlotFilter = (plotId: string) => {
-    if (plotId === "all") {
-      dispatch(setFilters({ plotId: undefined, page: 1 }));
-    } else {
-      dispatch(setFilters({ plotId, page: 1 }));
-    }
-  };
-
   const handlePageChange = (page: number) => {
     dispatch(setFilters({ page }));
   };
@@ -164,32 +87,31 @@ export function DefaulterList() {
   const handleResetFilters = () => {
     dispatch(resetFilters());
     setSearchValue("");
-    setSelectedIds([]);
   };
-
-  const handleSelectionChange = (ids: string[]) => setSelectedIds(ids);
 
   const handleExportReport = () => {
     const csvData = [
       [
         "Member",
         "Plot",
-        "Amount",
+        "File",
+        "Installments Overdue",
+        "Bills Overdue",
+        "Total Overdue",
         "Status",
-        "Overdue Days",
-        "Notice Sent",
-        "Created",
+        "Days Overdue",
+        "Notices Sent",
       ],
       ...(data?.items || []).map((item) => [
-        typeof item.memId === "object"
-          ? item.memId?.memName || item.memId?.fullName || "—"
-          : "—",
-        typeof item.plotId === "object" ? item.plotId?.plotNo : "—",
-        item.totalOverdueAmount,
-        item.status,
+        getMemberName(item),
+        item.plot?.plotNo || "—",
+        item.file?.fileRegNo || "—",
+        item.installmentsOverdue,
+        item.billsOverdue,
+        item.totalOverdue,
+        item.actualStatus,
         item.daysOverdue,
         item.noticeSentCount,
-        new Date(item.createdAt).toLocaleDateString(),
       ]),
     ];
     const csvContent = csvData.map((row) => row.join(",")).join("\n");
@@ -211,10 +133,9 @@ export function DefaulterList() {
         type: "select" as const,
         options: [
           { label: "All", value: "all" },
-          { label: "Active", value: "Warning" },
+          { label: "Warning", value: "Warning" },
           { label: "Suspended", value: "Suspended" },
           { label: "Legal Action", value: "Legal Action" },
-          { label: "Resolved", value: "Resolved" },
         ],
         onChange: handleStatusFilter,
       },
@@ -223,13 +144,12 @@ export function DefaulterList() {
         label: "Sort By",
         type: "select" as const,
         options: [
-          { label: "Overdue Days", value: "daysOverdue" },
-          { label: "Amount", value: "totalOverdueAmount" },
-          { label: "Created", value: "createdAt" },
-          { label: "Notice Count", value: "noticeSentCount" },
+          { label: "Days Overdue", value: "daysOverdue" },
+          { label: "Total Overdue", value: "totalOverdue" },
+          { label: "Installments Overdue", value: "installmentsOverdue" },
+          { label: "Bills Overdue", value: "billsOverdue" },
         ],
-        onChange: (value: string) =>
-          dispatch(setFilters({ sortBy: value, page: 1 })),
+        onChange: (value: string) => dispatch(setFilters({ sortBy: value as any, page: 1 })),
       },
       {
         id: "sortOrder",
@@ -239,20 +159,16 @@ export function DefaulterList() {
           { label: "Ascending", value: "asc" },
           { label: "Descending", value: "desc" },
         ],
-        onChange: (value: "asc" | "desc") =>
-          dispatch(setFilters({ sortOrder: value, page: 1 })),
+        onChange: (value: "asc" | "desc") => dispatch(setFilters({ sortOrder: value, page: 1 })),
       },
     ],
     enableActions: true,
-    enableSelection: true,
     actions: {
-      onEdit: canUpdate ? handleEdit : undefined,
-      onDelete: undefined,
       customActions: [
         {
           label: "View",
           icon: <span>👁️</span>,
-          onClick: (row: Defaulter) => handleView(row._id),
+          onClick: (row: DefaulterRow) => handleView(row.fileId),
           variant: "outline" as const,
         },
         ...(canUpdate
@@ -261,22 +177,6 @@ export function DefaulterList() {
                 label: "Send Notice",
                 icon: <Mail className="h-4 w-4" />,
                 onClick: handleSendNoticeClick,
-                variant: "outline" as const,
-              },
-              {
-                label: "Resolve",
-                icon: <CheckCircle2 className="h-4 w-4" />,
-                onClick: handleResolveClick,
-                variant: "outline" as const,
-              },
-            ]
-          : []),
-        ...(canDelete
-          ? [
-              {
-                label: "Delete",
-                icon: <Trash2 className="h-4 w-4" />,
-                onClick: handleDeleteClick,
                 variant: "outline" as const,
               },
             ]
@@ -289,8 +189,7 @@ export function DefaulterList() {
           totalPages: data.pagination.pages,
           onPageChange: handlePageChange,
           pageSize: data.pagination.limit,
-          onPageSizeChange: (size: number) =>
-            dispatch(setFilters({ limit: size, page: 1 })),
+          onPageSizeChange: (size: number) => dispatch(setFilters({ limit: size, page: 1 })),
           totalItems: data.pagination.total,
         }
       : undefined,
@@ -302,7 +201,7 @@ export function DefaulterList() {
       <div>
         <h1 className="text-2xl font-bold">Defaulters</h1>
         <p className="text-muted-foreground">
-          Manage overdue payments and defaulters
+          Files with installments or bills overdue past the society&apos;s threshold — computed live from the ledger, not a manually-maintained list.
         </p>
       </div>
 
@@ -316,65 +215,52 @@ export function DefaulterList() {
             iconClassName="text-blue-600"
           />
           <SummaryCard
-            title="Active Defaulters"
-            value={statistics.activeDefaulters ?? 0}
+            title="Installments Overdue"
+            value={formatCurrency(statistics.totalInstallmentsOverdue ?? 0)}
             icon={AlertCircle}
             iconBgClassName="bg-yellow-100"
             iconClassName="text-yellow-600"
             valueClassName="text-yellow-600"
           />
           <SummaryCard
-            title="Total Overdue Amount"
+            title="Bills Overdue"
+            value={formatCurrency(statistics.totalBillsOverdue ?? 0)}
+            icon={AlertCircle}
+            iconBgClassName="bg-orange-100"
+            iconClassName="text-orange-600"
+            valueClassName="text-orange-600"
+          />
+          <SummaryCard
+            title="Total Overdue"
             value={formatCurrency(statistics.totalOverdueAmount ?? 0)}
             icon={DollarSign}
             iconBgClassName="bg-red-100"
             iconClassName="text-red-600"
             valueClassName="text-red-600"
           />
-          <SummaryCard
-            title="Resolved"
-            value={statistics.byStatus?.Resolved ?? 0}
-            icon={CheckCircle2}
-            iconBgClassName="bg-green-100"
-            iconClassName="text-green-600"
-            valueClassName="text-green-600"
-          />
         </div>
       )}
 
       <ActionBar
         left={
-          <>
-            {Object.keys(filters).length > 4 && (
-              <Button variant="glass" size="sm" onClick={handleResetFilters}>
-                <RefreshCw className="size-4" />
-                Reset Filters
-              </Button>
-            )}
-            {selectedIds.length > 0 && (
-              <span className="text-xs text-muted-foreground self-center">
-                {selectedIds.length} selected
-              </span>
-            )}
-            <Button variant="glass" size="sm" onClick={handleExportReport}>
-              <Download className="size-4" />
-              Export
-            </Button>
-          </>
-        }
-        right={
-          canCreate && (
-            <Button variant="primary" size="sm" onClick={handleCreate}>
-              <Plus className="size-4" />
-              Add Defaulter
+          Object.keys(filters).length > 4 && (
+            <Button variant="glass" size="sm" onClick={handleResetFilters}>
+              <RefreshCw className="size-4" />
+              Reset Filters
             </Button>
           )
+        }
+        right={
+          <Button variant="glass" size="sm" onClick={handleExportReport}>
+            <Download className="size-4" />
+            Export
+          </Button>
         }
       />
 
       <Card>
         <CardHeader icon={UserX}>
-          <CardTitle>Defaulter Records</CardTitle>
+          <CardTitle>Defaulter List</CardTitle>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -383,51 +269,17 @@ export function DefaulterList() {
             isLoading={isLoading}
             onSearch={handleSearch}
             onFilterChange={handleFilterChange}
-            onSelectionChange={handleSelectionChange}
           />
         </CardContent>
       </Card>
 
-      <DeleteDefaulterDialog
-        open={deleteDialog.open}
-        onOpenChange={(open) =>
-          setDeleteDialog((p) => ({ ...p, open, row: open ? p.row : null }))
-        }
-        defaulterName={deleteDialog.row ? getMemberName(deleteDialog.row.memId) : undefined}
-        onConfirm={handleDeleteConfirm}
-      />
       <SendNoticeDialog
         open={sendNoticeDialog.open}
         onOpenChange={(open) =>
-          setSendNoticeDialog((p) => ({
-            ...p,
-            open,
-            row: open ? p.row : null,
-          }))
+          setSendNoticeDialog((p) => ({ ...p, open, row: open ? p.row : null }))
         }
-        defaulterName={
-          sendNoticeDialog.row
-            ? getMemberName(sendNoticeDialog.row.memId)
-            : undefined
-        }
+        defaulterName={sendNoticeDialog.row ? getMemberName(sendNoticeDialog.row) : undefined}
         onSubmit={handleSendNoticeSubmit}
-      />
-      <ResolveDefaulterDialog
-        open={resolveDialog.open}
-        onOpenChange={(open) =>
-          setResolveDialog((p) => ({
-            ...p,
-            open,
-            row: open ? p.row : null,
-          }))
-        }
-        defaulterName={
-          resolveDialog.row
-            ? getMemberName(resolveDialog.row.memId)
-            : undefined
-        }
-        overdueAmount={resolveDialog.row?.totalOverdueAmount}
-        onSubmit={handleResolveSubmit}
       />
     </div>
   );

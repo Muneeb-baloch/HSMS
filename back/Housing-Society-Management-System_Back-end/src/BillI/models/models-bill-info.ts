@@ -24,6 +24,7 @@ export interface IBillInfo extends Document {
   fineAmount: number;
   arrears: number;
   totalPayable: number;
+  amountPaid: number;
   dueDate: Date;
   gracePeriodDays: number;
   status: string;
@@ -134,6 +135,11 @@ const billInfoSchema = new Schema<IBillInfo>(
       required: [true, 'Total payable is required'],
       min: [0, 'Total payable cannot be negative'],
     },
+    amountPaid: {
+      type: Number,
+      default: 0,
+      min: [0, 'Amount paid cannot be negative'],
+    },
     dueDate: {
       type: Date,
       required: [true, 'Due date is required'],
@@ -220,7 +226,14 @@ const billInfoSchema = new Schema<IBillInfo>(
 // Compound indexes for efficient querying
 billInfoSchema.index({ societyId: 1, isDeleted: 1 });
 billInfoSchema.index({ billNo: 1, isDeleted: 1 }, { unique: true });
-billInfoSchema.index({ memId: 1, billMonth: 1, billTypeId: 1 });
+// One bill per {file, bill type, month} - prevents the same recurring charge
+// (e.g. maintenance for "November 2026") from being generated twice for the
+// same file. Replaces the old memId-based (non-unique) index: a member can
+// have multiple files, and the charge is really per-file, not per-member.
+billInfoSchema.index(
+  { fileId: 1, billTypeId: 1, billMonth: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false }, name: 'uniq_bill_per_file_type_month' }
+);
 billInfoSchema.index({ status: 1, dueDate: 1 });
 billInfoSchema.index({ fileId: 1, isActive: 1 });
 billInfoSchema.index({ dueDate: -1, isActive: 1 });
@@ -303,20 +316,16 @@ billInfoSchema.virtual('daysOverdue').get(function () {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
-// Virtual for total paid amount (based on status)
+// Virtual for total paid amount — derived from the real amountPaid field
+// (previously guessed from status: Paid = 100%, Partially Paid = a flat 50%
+// regardless of what was actually paid).
 billInfoSchema.virtual('totalPaid').get(function () {
-  if (this.status === BillStatus.PAID) {
-    return this.totalPayable;
-  } else if (this.status === BillStatus.PARTIALLY_PAID) {
-    // For partially paid, we assume 50% payment (adjust as needed)
-    return this.totalPayable * 0.5;
-  }
-  return 0;
+  return this.amountPaid ?? 0;
 });
 
 // Virtual for remaining balance
 billInfoSchema.virtual('remainingBalance').get(function () {
-  return this.totalPayable - (this.totalPaid ?? 0);
+  return Math.max(0, (this.totalPayable ?? 0) - (this.amountPaid ?? 0));
 });
 
 // Virtual for status badge color
@@ -330,6 +339,20 @@ billInfoSchema.virtual('statusBadgeColor').get(function () {
     [BillStatus.DISPUTED]: 'dark',
   };
   return colors[this.status] || 'secondary';
+});
+
+// Pre-validate middleware: totalPayable is required, but required-field
+// checks run before pre('save') hooks, so a brand-new document that omits it
+// gets rejected with "Total payable is required" before the pre('save')
+// calculation below ever runs. Fill it in here, before validation, only
+// when missing; pre('save') still recomputes it below whenever billAmount/
+// fineAmount/arrears are modified (always true for a new doc), so this
+// doesn't change the final persisted value.
+billInfoSchema.pre('validate', function (next) {
+  if (this.totalPayable === undefined && this.billAmount !== undefined) {
+    this.totalPayable = this.billAmount + (this.fineAmount || 0) + (this.arrears || 0);
+  }
+  next();
 });
 
 // Pre-save middleware
@@ -358,7 +381,9 @@ billInfoSchema.pre('save', function (next) {
     this.totalPayable = this.billAmount + this.fineAmount + this.arrears;
   }
 
-  // Auto-update status based on due date
+  // Auto-update status based on due date (Pending -> Overdue). The
+  // amount-based block below takes precedence over this when something has
+  // actually been paid.
   if (this.isModified('dueDate') || this.isModified('status')) {
     const now = new Date();
     const graceEndDate = new Date(this.dueDate);
@@ -369,52 +394,28 @@ billInfoSchema.pre('save', function (next) {
     }
   }
 
-  next();
-});
-
-// Pre-update middleware
-billInfoSchema.pre('findOneAndUpdate', function (next) {
-  const update = this.getUpdate() as any;
-
-  if (update) {
-    // Convert billNo to uppercase
-    if (update.billNo) {
-      update.billNo = update.billNo.toUpperCase();
-    }
-
-    // Calculate total payable if amount fields are updated
-    if (
-      update.billAmount !== undefined ||
-      update.fineAmount !== undefined ||
-      update.arrears !== undefined
-    ) {
-      const billAmount = update.billAmount || this.get('billAmount') || 0;
-      const fineAmount = update.fineAmount || this.get('fineAmount') || 0;
-      const arrears = update.arrears || this.get('arrears') || 0;
-      update.totalPayable = billAmount + fineAmount + arrears;
-    }
-
-    // Update payment date if status changes to PAID
-    if (update.status === BillStatus.PAID && !update.paymentDate) {
-      update.paymentDate = new Date();
-    }
-
-    // Calculate units consumed if readings are updated
-    if (update.currentReading !== undefined || update.previousReading !== undefined) {
-      const currentReading = update.currentReading || this.get('currentReading');
-      const previousReading = update.previousReading || this.get('previousReading');
-
-      if (currentReading !== undefined && previousReading !== undefined) {
-        update.unitsConsumed = currentReading - previousReading;
-        if (update.unitsConsumed < 0) {
-          update.unitsConsumed = 0;
-        }
+  // Status is derived from amountPaid vs totalPayable, same as Installment.
+  // Cancelled/Disputed are administrative states and are never overwritten
+  // here. amountPaid === 0 falls through untouched, leaving whatever the
+  // due-date block above set (Pending or Overdue).
+  if (
+    this.status !== BillStatus.CANCELLED &&
+    this.status !== BillStatus.DISPUTED &&
+    (this.isModified('amountPaid') || this.isModified('totalPayable') || this.isNew)
+  ) {
+    if (this.totalPayable > 0 && this.amountPaid >= this.totalPayable) {
+      this.status = BillStatus.PAID;
+      if (!this.paymentDate) {
+        this.paymentDate = new Date();
       }
+    } else if (this.amountPaid > 0) {
+      this.status = BillStatus.PARTIALLY_PAID;
     }
   }
 
   next();
 });
+
 
 // Static method to find by bill number
 billInfoSchema.statics.findByBillNo = function (billNo: string) {

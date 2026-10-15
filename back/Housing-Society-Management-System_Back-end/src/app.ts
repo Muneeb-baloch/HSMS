@@ -1021,12 +1021,20 @@ export async function createApp(): Promise<Application> {
     setupRoutes(app);
     console.log('✅ [createApp-8] Routes setup');
 
-    if (!config.liteMode) {
+    // Cron needs a persistent long-running process (node-cron keeps its own
+    // timers) - that's incompatible with Vercel's serverless functions, same
+    // reason Socket.IO is skipped there below. It is NOT tied to liteMode:
+    // liteMode only trims memory/CPU usage (smaller heap, skip Swagger, skip
+    // auto-seeding), and gating cron on it meant markOverdueInstallments
+    // never ran in dev OR in the packaged "start" script, both of which set
+    // LITE_MODE=1 - so stored Overdue status and lateFeeSurcharge never
+    // self-healed in any environment this app actually launches through.
+    if (process.env.VERCEL !== '1') {
       console.log('🔍 [createApp-8b] Starting installment cron jobs...');
       startInstallmentCron();
       console.log('✅ [createApp-8b] Installment cron jobs started');
     } else {
-      console.log('⏭️ [createApp-8b] Skipping cron (lite mode)');
+      console.log('⏭️ [createApp-8b] Skipping cron (VERCEL=1: serverless, no persistent process)');
     }
 
     // Setup error handling

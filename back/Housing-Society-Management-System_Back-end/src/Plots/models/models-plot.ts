@@ -354,6 +354,32 @@ const plotSchema = new Schema<IPlot, any, IPlotMethods>(
   }
 );
 
+// Pre-validate middleware: plotArea, areaBase and plotTotalAmount are all
+// required, but required-field checks run before pre('save') hooks, so a
+// brand-new document that omits them gets rejected with "X is required"
+// before the pre('save') calculations below ever run. Fill them in here,
+// before validation, only when missing; pre('save') unconditionally
+// recalculates all three on every save anyway, so this doesn't change the
+// final persisted value - it only lets a bare `Plot.create({...})` call
+// (no manual precompute) pass validation in the first place.
+plotSchema.pre('validate', function (next) {
+  if (
+    this.plotArea === undefined &&
+    this.plotLength !== undefined &&
+    this.plotWidth !== undefined
+  ) {
+    this.plotArea = parseFloat((this.plotLength * this.plotWidth).toFixed(2));
+  }
+  if ((this.areaBase === undefined || this.areaBase === null) && this.plotArea !== undefined) {
+    this.areaBase = toBaseSqft(this.plotArea, 'sqft');
+  }
+  if (this.plotTotalAmount === undefined && this.plotBasePrice !== undefined) {
+    this.plotTotalAmount =
+      this.plotBasePrice + (this.surchargeAmount || 0) - (this.discountAmount || 0);
+  }
+  next();
+});
+
 // Update the pre-save middleware - add this at the beginning
 plotSchema.pre('save', async function (next) {
   // Calculate plot area

@@ -24,6 +24,7 @@ export interface BillInfoType {
   fineAmount: number;
   arrears: number;
   totalPayable: number;
+  amountPaid: number;
   dueDate: Date;
   gracePeriodDays: number;
   status: BillStatus;

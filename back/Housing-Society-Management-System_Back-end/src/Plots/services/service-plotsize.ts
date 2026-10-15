@@ -23,11 +23,12 @@ export const plotSizeService = {
    * Create new plot size
    */
   async createPlotSize(data: CreatePlotSizeDto, userId: Types.ObjectId): Promise<any> {
-    // Calculate standard base price if not provided
+    // standardBasePrice is computed by the PlotSize model itself
+    // (pre('validate') fills it in so the required-field check passes, then
+    // pre('save') unconditionally recalculates it) - no need to precompute
+    // it here.
     const plotSizeData = {
       ...data,
-      standardBasePrice:
-        data.standardBasePrice || parseFloat((data.totalArea * data.ratePerUnit).toFixed(2)),
       createdBy: userId,
       updatedBy: userId,
     };
@@ -41,6 +42,7 @@ export const plotSizeService = {
    */
   async getPlotSizeById(id: string): Promise<any | null> {
     const plotSize = await PlotSize.findById(id)
+      .populate('projectId', 'projName projCode')
       .populate('createdBy', 'firstName lastName email')
       .populate('updatedBy', 'firstName lastName email');
 
@@ -106,6 +108,7 @@ export const plotSizeService = {
     // Execute queries
     const [plotSizes, total] = await Promise.all([
       PlotSize.find(query)
+        .populate('projectId', 'projName projCode')
         .populate('createdBy', 'firstName lastName email')
         .populate('updatedBy', 'firstName lastName email')
         .skip(skip)
@@ -181,6 +184,7 @@ export const plotSizeService = {
       },
       { new: true, runValidators: true }
     )
+      .populate('projectId', 'projName projCode')
       .populate('createdBy', 'firstName lastName email')
       .populate('updatedBy', 'firstName lastName email');
 

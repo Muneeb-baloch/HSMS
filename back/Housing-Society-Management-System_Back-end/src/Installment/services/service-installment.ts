@@ -209,24 +209,27 @@ export const installmentService = {
       throw new Error('Installment category not found');
     }
 
-    // Check for duplicate installment number for same file and category
+    // installmentNo is unique per file (enforced by a unique index on
+    // {fileId, installmentNo}) regardless of category - the plan generator
+    // already treats it as a single global sequence across all rows in a
+    // file's ledger, never reset per category.
     const existingInstallment = await Installment.findOne({
       fileId: data.fileId,
-      installmentCategoryId: data.installmentCategoryId,
       installmentNo: data.installmentNo,
       isDeleted: false,
     });
 
     if (existingInstallment) {
-      throw new Error(
-        `Installment number ${data.installmentNo} already exists for this file and category`
-      );
+      throw new Error(`Installment number ${data.installmentNo} already exists for this file`);
     }
 
+    // totalPayable is computed by the Installment model itself
+    // (pre('validate') fills it in so the required-field check passes, then
+    // pre('save') unconditionally recalculates it along with
+    // balanceAmount/status/lateFeeSurcharge) - no need to precompute it here.
     const installmentData: any = {
       ...data,
       societyId: (member as any).societyId,
-      totalPayable: data.amountDue + (data.lateFeeSurcharge || 0),
       amountPaid: 0,
       balanceAmount: data.amountDue + (data.lateFeeSurcharge || 0),
       status: InstallmentStatus.UNPAID,
@@ -491,7 +494,19 @@ export const installmentService = {
       query.installmentCategoryId = new Types.ObjectId(installmentCategoryId);
     }
 
-    if (status) {
+    // "Overdue" is a label, not a reliably-updated stored state - the stored
+    // status field only flips to Overdue via the daily cron (or the next
+    // document .save(), which most update paths don't trigger). Computing it
+    // live here means this filter is correct regardless of whether that cron
+    // has run recently. Every other status value is a real stored/derived
+    // state (Paid/Cancelled/Refunded are explicit; Unpaid/Partially Paid are
+    // always kept correct by recordPayment) so those still match directly.
+    if (status === InstallmentStatus.OVERDUE) {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      query.dueDate = { $lt: startOfToday };
+      query.status = { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] };
+    } else if (status) {
       query.status = status;
     }
 
@@ -575,20 +590,18 @@ export const installmentService = {
       }
     }
 
-    // Check for duplicate installment number if being updated
+    // Check for duplicate installment number if being updated (unique per
+    // file regardless of category - see createInstallment for why)
     if (data.installmentNo && data.installmentNo !== existingInstallment.installmentNo) {
       const duplicateInstallment = await Installment.findOne({
         _id: { $ne: id },
         fileId: existingInstallment.fileId,
-        installmentCategoryId: existingInstallment.installmentCategoryId,
         installmentNo: data.installmentNo,
         isDeleted: false,
       });
 
       if (duplicateInstallment) {
-        throw new Error(
-          `Installment number ${data.installmentNo} already exists for this file and category`
-        );
+        throw new Error(`Installment number ${data.installmentNo} already exists for this file`);
       }
     }
 

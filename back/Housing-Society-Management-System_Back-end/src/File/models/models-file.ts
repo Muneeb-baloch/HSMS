@@ -14,6 +14,25 @@ export enum FileStatus {
   DISPUTED = 'Disputed',
 }
 
+/**
+ * Every FileStatus except CANCELLED. A plot counts as occupied by a File in
+ * any of these states - see the uniq_active_file_per_plot index below for
+ * why this is NOT just [ACTIVE, PENDING]. The single source of truth for
+ * "does this file still hold the plot" - the index's partialFilterExpression
+ * and every app-level double-booking guard in service-file.ts (createFile,
+ * updateFile, assignPlot) all use this same array, so they can't drift apart
+ * the way the index briefly did from the original [ACTIVE, PENDING] check.
+ */
+export const PLOT_OCCUPYING_FILE_STATUSES = [
+  FileStatus.ACTIVE,
+  FileStatus.PENDING,
+  FileStatus.TRANSFERRED,
+  FileStatus.SUSPENDED,
+  FileStatus.DISPUTED,
+  FileStatus.MERGED,
+  FileStatus.CLOSED,
+];
+
 // @deprecated - use LookupValue collection (category: 'payment_mode') instead
 export enum PaymentMode {
   CASH = 'Cash',
@@ -213,6 +232,37 @@ const fileSchema = new Schema<IFile>(
 // ------------------- INDEXES -------------------
 fileSchema.index({ fileRegNo: 1, isDeleted: 1 }, { unique: true });
 fileSchema.index({ fileBarCode: 1, isDeleted: 1 }, { unique: true });
+// A plot is occupied by any File that isn't Cancelled. This was originally
+// written as status $in [ACTIVE, PENDING] (matching the pre-existing
+// app-level check in service-file.ts), but transferFile() proved that
+// wrong: a transfer does NOT create a new File - it mutates the SAME
+// document's memId and sets status to TRANSFERRED, with the ledger
+// (installments) continuing unchanged on the same fileId. A real pre-
+// existing File in this DB has exactly that shape (status: 'Transferred',
+// still the only file on its plot) - under the old [ACTIVE, PENDING] rule,
+// a second file could have been booked against that same, still-occupied
+// plot. CLOSED (actualCompletionDate stamped = plan completed successfully)
+// is the same story: a finished sale, not a freed plot. SUSPENDED/DISPUTED/
+// MERGED have no dedicated code path that frees the plot either - nothing
+// in this codebase ever demonstrates that leaving a plot's only File in one
+// of those states means the plot is available again. Only CANCELLED has
+// that evidence (deleteFile's dedicated cancel path). So: block everything
+// except Cancelled. (MongoDB's partialFilterExpression doesn't support $ne/
+// $not, confirmed empirically against this MongoDB version - hence the
+// explicit $in of every other FileStatus value rather than a $ne. If a new
+// FileStatus value is ever added, it needs to be added here too - and to
+// the matching checks in service-file.ts's createFile/updateFile.)
+fileSchema.index(
+  { plotId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      isDeleted: false,
+      status: { $in: PLOT_OCCUPYING_FILE_STATUSES },
+    },
+    name: 'uniq_active_file_per_plot',
+  }
+);
 fileSchema.index({ plotId: 1, memId: 1 });
 fileSchema.index({ status: 1, isActive: 1 });
 fileSchema.index({ memId: 1, isDeleted: 1 });

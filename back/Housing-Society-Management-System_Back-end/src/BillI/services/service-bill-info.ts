@@ -67,13 +67,28 @@ export const billInfoService = {
       throw new Error('Bill type not found');
     }
 
+    // One bill per {file, bill type, month} - also enforced by a unique index.
+    const existingPeriodBill = await BillInfo.findOne({
+      fileId: data.fileId,
+      billTypeId: data.billTypeId,
+      billMonth: data.billMonth,
+      isDeleted: false,
+    });
+    if (existingPeriodBill) {
+      throw new Error(
+        `A ${billTypeDoc.billTypeName} bill for ${data.billMonth} already exists for this file`
+      );
+    }
+
     let billAmount = data.billAmount;
     if (billAmount === undefined || billAmount === null) {
       billAmount = billTypeDoc.defaultAmount ?? 0;
     }
 
-    // Calculate total payable
-    const totalPayable = billAmount + (data.fineAmount || 0) + (data.arrears || 0);
+    // totalPayable is computed by the BillInfo model itself (pre('validate')
+    // fills it in so the required-field check passes, then pre('save')
+    // recalculates it whenever billAmount/fineAmount/arrears are modified,
+    // which is always true for a new doc) - no need to precompute it here.
 
     // Calculate units consumed if readings are provided
     let unitsConsumed: number | undefined;
@@ -87,7 +102,6 @@ export const billInfoService = {
       billTypeId: data.billTypeId,
       billAmount,
       unitsConsumed,
-      totalPayable,
       fineAmount: data.fineAmount || 0,
       arrears: data.arrears || 0,
       gracePeriodDays: data.gracePeriodDays || 7,
@@ -362,6 +376,12 @@ export const billInfoService = {
 
   /**
    * Record payment for a bill
+   *
+   * This is the sole path for updating payment-related fields (amountPaid, status,
+   * paymentDate, paymentMethod, transactionId). All payment logic is computed here;
+   * do not use generic findOneAndUpdate for payment changes. The pre-save hook
+   * computes non-payment fields (totalPayable, unitsConsumed) but payment state
+   * (balance, status) is derived only in this method.
    */
   async recordPayment(
     id: string,
@@ -385,28 +405,26 @@ export const billInfoService = {
       throw new Error('Payment amount must be greater than 0');
     }
 
-    if (data.paymentAmount > bill.totalPayable) {
-      throw new Error('Payment amount cannot exceed total payable amount');
+    // amountPaid accumulates across payments, like Installment.recordPayment —
+    // the previous version re-derived "arrears" from the original totalPayable
+    // on every call instead of tracking a running total, so a second partial
+    // payment silently overwrote (rather than added to) the first.
+    const newAmountPaid = bill.amountPaid + data.paymentAmount;
+
+    if (newAmountPaid > bill.totalPayable) {
+      throw new Error(
+        `Payment amount exceeds total payable. Maximum payment allowed: ${bill.totalPayable - bill.amountPaid}`
+      );
     }
 
-    let newStatus = BillStatus.PARTIALLY_PAID;
-    let updateArrears = bill.arrears;
-
-    if (data.paymentAmount >= bill.totalPayable) {
-      newStatus = BillStatus.PAID;
-      updateArrears = 0;
-    } else if (data.paymentAmount < bill.totalPayable) {
-      // Calculate remaining amount
-      const remainingAmount = bill.totalPayable - data.paymentAmount;
-      updateArrears = remainingAmount;
-    }
+    const newStatus =
+      newAmountPaid >= bill.totalPayable ? BillStatus.PAID : BillStatus.PARTIALLY_PAID;
 
     const updateObj: any = {
+      amountPaid: newAmountPaid,
       status: newStatus,
       paymentDate: data.paymentDate,
       paymentMethod: data.paymentMethod,
-      arrears: updateArrears,
-      totalPayable: bill.totalPayable, // Keep original total for record
       modifiedBy: userId,
     };
 

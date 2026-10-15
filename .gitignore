@@ -53,3 +53,6 @@ npm-debug.log*
 
 Thumbs.db
 config.bat
+
+# Local agent notes
+CLAUDE.md
