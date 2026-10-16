@@ -232,12 +232,10 @@ const plotSchema = new Schema<IPlot, any, IPlotMethods>(
 
     plotRegistrationNo: {
       type: String,
-      unique: true,
       trim: true,
       uppercase: true,
       minlength: [10, 'Registration Number must be at least 10 characters'],
       maxlength: [50, 'Registration Number cannot exceed 50 characters'],
-      index: true,
     },
 
     plotCornerNo: {
@@ -476,6 +474,9 @@ plotSchema.index({ srDevStatId: 1, isDeleted: 1 });
 plotSchema.index({ plotType: 1, isDeleted: 1 });
 plotSchema.index({ isPossessionReady: 1, isDeleted: 1 });
 plotSchema.index({ createdBy: 1, isDeleted: 1 });
+
+// Unique index on plotRegistrationNo for non-deleted records (allows duplicates in deleted records)
+plotSchema.index({ plotRegistrationNo: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
 
 // Text index for search
 plotSchema.index(

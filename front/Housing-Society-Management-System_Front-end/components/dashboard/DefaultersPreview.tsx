@@ -2,8 +2,7 @@
 
 import { motion } from "framer-motion";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { useDefaulters } from "@/lib/hooks/entities/useDefaulter";
-import { useOverdueSummary } from "@/lib/hooks/entities/useDefaulter";
+import { useDefaulters, useDefaulterStatistics } from "@/lib/hooks/entities/useDefaulter";
 import { MiniListCard, MiniListEmpty } from "./MiniListCard";
 import Link from "next/link";
 
@@ -17,34 +16,26 @@ export function DefaultersPreview() {
   const defaultersQuery = useDefaulters({
     page: 1,
     limit: 5,
-    isActive: true,
-    sortBy: "totalOverdueAmount",
+    sortBy: "totalOverdue",
     sortOrder: "desc",
   });
-  const overdueSummary = useOverdueSummary();
+  const statsQuery = useDefaulterStatistics();
 
   const defaulters = defaultersQuery.data?.items ?? [];
-  const totalOverdue =
-    (overdueSummary.data as { totalAmount?: number })?.totalAmount ??
-    (defaulters as { totalOverdueAmount?: number }[]).reduce(
-      (s, d) => s + (d.totalOverdueAmount ?? 0),
-      0
-    );
+  const totalOverdue = statsQuery.data?.totalOverdueAmount ?? 0;
   const isLoading = defaultersQuery.isLoading;
 
   const getMemberName = (d: (typeof defaulters)[0]) => {
-    const mem = d.memId;
-    if (typeof mem === "object" && mem?.memName) return mem.memName;
-    if (typeof mem === "object" && (mem as { fullName?: string })?.fullName)
-      return (mem as { fullName: string }).fullName;
+    const mem = d.member;
+    if (mem?.memName) return mem.memName;
+    if (mem?.fullName) return mem.fullName;
     return "—";
   };
 
   const getPlotNo = (d: (typeof defaulters)[0]) => {
-    const plot = d.plotId;
-    if (typeof plot === "object" && plot?.plotNo) return plot.plotNo;
-    if (typeof plot === "object" && (plot as { plotBlockId?: { plotBlockName?: string } })?.plotBlockId)
-      return (plot as { plotBlockId: { plotBlockName?: string } }).plotBlockId?.plotBlockName ?? "—";
+    const plot = d.plot;
+    if (plot?.plotNo) return plot.plotNo;
+    if (plot?.plotBlockId?.plotBlockName) return plot.plotBlockId.plotBlockName;
     return "—";
   };
 
@@ -116,7 +107,7 @@ export function DefaultersPreview() {
                     </p>
                   </div>
                   <span className="shrink-0 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                    PKR {formatPKR(d.totalOverdueAmount ?? 0)}
+                    PKR {formatPKR(d.totalOverdue ?? 0)}
                   </span>
                 </Link>
               </li>

@@ -24,9 +24,9 @@ export function DefaultersScatterChart() {
     const items = data?.items ?? [];
     return items.map((d) => ({
       x: d.daysOverdue,
-      y: d.totalOverdueAmount,
+      y: d.totalOverdue,
       z: 400,
-      name: (d.memId as { memName?: string })?.memName ?? "Member",
+      name: d.member?.memName ?? "Member",
     }));
   }, [data]);
 

@@ -105,7 +105,6 @@ const installmentPlanDetailSchema = new Schema<IInstallmentPlanDetail>(
 );
 
 installmentPlanDetailSchema.index({ societyId: 1, isDeleted: 1 });
-installmentPlanDetailSchema.index({ planId: 1, occurrence: 1 });
 installmentPlanDetailSchema.index(
   { planId: 1, occurrence: 1 },
   { unique: true, partialFilterExpression: { isDeleted: false } }

@@ -22,10 +22,8 @@ const plotSizeSchema = new Schema<IPlotSize>(
       type: String,
       required: [true, 'Plot Size Name is required'],
       trim: true,
-      unique: true,
       minlength: [2, 'Plot Size Name must be at least 2 characters'],
       maxlength: [100, 'Plot Size Name cannot exceed 100 characters'],
-      index: true,
     },
 
     societyId: {
@@ -162,6 +160,12 @@ plotSizeSchema.pre('findOneAndUpdate', function (next) {
 
 // Index for soft delete filtering
 plotSizeSchema.index({ isDeleted: 1 });
+
+// Unique index on {projectId, plotSizeName} for non-deleted records (allows same size name in different projects)
+plotSizeSchema.index(
+  { projectId: 1, plotSizeName: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
+);
 
 // Text index for search
 plotSizeSchema.index(
