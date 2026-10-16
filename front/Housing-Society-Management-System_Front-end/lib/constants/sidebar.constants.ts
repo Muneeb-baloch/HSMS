@@ -933,6 +933,28 @@ export const SECONDARY_NAV_ITEMS: SidebarNavItem[] = [
   },
 ];
 
+// ─── Sidebar Visibility Config ─────────────────────────────────────────────────
+// Set a flag to `false` to hide that section/item from the left sidebar only.
+// Pages, routes, components, and backend code are untouched; flip back to
+// `true` (or delete the entry) to re-enable.
+export const SIDEBAR_VISIBILITY: {
+  sections: Record<string, boolean>;
+  items: Record<string, boolean>;
+} = {
+  sections: {
+    "ai-automation": false,
+    vendors: false,
+    workforce: false,
+  },
+  items: {
+    gamification: false,
+    "payment-gateway": false,
+    plra: false,
+    meetings: false,
+    polls: false,
+  },
+};
+
 // ─── Helper & Config ──────────────────────────────────────────────────────────
 export const filterItemsByRole = (
   items: SidebarNavItem[],
@@ -940,6 +962,7 @@ export const filterItemsByRole = (
 ): SidebarNavItem[] => {
   return items
     .filter((item) => {
+      if (SIDEBAR_VISIBILITY.items[item.id] === false) return false;
       if (!item.requiredRole) return true;
       if (item.isDivider || item.sectionTitle) return true;
       return hasPermission(userRole, item.requiredRole);
@@ -960,24 +983,26 @@ export const filterItemsByRole = (
 };
 
 export const getSidebarConfig = (userRole: UserRole): SidebarConfig => {
+  const sections = [
+    { id: "dashboard", title: "Dashboard", items: filterItemsByRole(DASHBOARD_ITEMS, userRole) },
+    { id: "member-property", title: "Member & Property", items: filterItemsByRole(MEMBER_PROPERTY_ITEMS, userRole) },
+    { id: "financial", title: "Financial", items: filterItemsByRole(FINANCIAL_ITEMS, userRole) },
+    { id: "applications", title: "Applications & Requests", items: filterItemsByRole(APPLICATIONS_ITEMS, userRole) },
+    { id: "master-data", title: "Master Data", items: filterItemsByRole(MASTER_DATA_ITEMS, userRole) },
+    { id: "administration", title: "Administration", items: filterItemsByRole(ADMINISTRATION_ITEMS, userRole) },
+    { id: "communication", title: "Communication", items: filterItemsByRole(COMMUNICATION_ITEMS, userRole) },
+    { id: "ai-automation", title: "AI & Automation", items: filterItemsByRole(AI_AUTOMATION_ITEMS, userRole) },
+    { id: "vendors", title: "Vendor Management", items: filterItemsByRole(VENDOR_ITEMS, userRole) },
+    { id: "workforce", title: "Workforce", items: filterItemsByRole(WORKFORCE_ITEMS, userRole) },
+    { id: "visitor-facility", title: "Visitor & Facility", items: filterItemsByRole(VISITOR_FACILITY_ITEMS, userRole) },
+    { id: "community", title: "Community", items: filterItemsByRole(COMMUNITY_ITEMS, userRole) },
+    { id: "staff", title: "Staff", items: filterItemsByRole(STAFF_ITEMS, userRole) },
+    { id: "super-admin", title: "Super Admin", items: filterItemsByRole(SUPER_ADMIN_ITEMS, userRole) },
+    { id: "system-config", title: "System", items: filterItemsByRole(SYSTEM_CONFIG_ITEMS, userRole) },
+  ].filter((section) => SIDEBAR_VISIBILITY.sections[section.id] !== false);
+
   return {
-    sections: [
-      { id: "dashboard", title: "Dashboard", items: filterItemsByRole(DASHBOARD_ITEMS, userRole) },
-      { id: "member-property", title: "Member & Property", items: filterItemsByRole(MEMBER_PROPERTY_ITEMS, userRole) },
-      { id: "financial", title: "Financial", items: filterItemsByRole(FINANCIAL_ITEMS, userRole) },
-      { id: "applications", title: "Applications & Requests", items: filterItemsByRole(APPLICATIONS_ITEMS, userRole) },
-      { id: "master-data", title: "Master Data", items: filterItemsByRole(MASTER_DATA_ITEMS, userRole) },
-      { id: "administration", title: "Administration", items: filterItemsByRole(ADMINISTRATION_ITEMS, userRole) },
-      { id: "communication", title: "Communication", items: filterItemsByRole(COMMUNICATION_ITEMS, userRole) },
-      { id: "ai-automation", title: "AI & Automation", items: filterItemsByRole(AI_AUTOMATION_ITEMS, userRole) },
-      { id: "vendors", title: "Vendor Management", items: filterItemsByRole(VENDOR_ITEMS, userRole) },
-      { id: "workforce", title: "Workforce", items: filterItemsByRole(WORKFORCE_ITEMS, userRole) },
-      { id: "visitor-facility", title: "Visitor & Facility", items: filterItemsByRole(VISITOR_FACILITY_ITEMS, userRole) },
-      { id: "community", title: "Community", items: filterItemsByRole(COMMUNITY_ITEMS, userRole) },
-      { id: "staff", title: "Staff", items: filterItemsByRole(STAFF_ITEMS, userRole) },
-      { id: "super-admin", title: "Super Admin", items: filterItemsByRole(SUPER_ADMIN_ITEMS, userRole) },
-      { id: "system-config", title: "System", items: filterItemsByRole(SYSTEM_CONFIG_ITEMS, userRole) },
-    ],
+    sections,
     user: {
       name: "Loading...",
       email: "Loading...",
