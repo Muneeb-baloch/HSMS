@@ -10,7 +10,7 @@ import { useEffect } from 'react'
 export default function ReceiptResolverPage() {
   const router = useRouter()
   const params = useParams()
-  const targetType = params.targetType as 'installment' | 'bill'
+  const targetType = params.targetType as 'installment' | 'bill' | 'transfer'
   const targetId = params.targetId as string
 
   const { data: receipts, isLoading } = usePaymentsByTarget(targetType, targetId)

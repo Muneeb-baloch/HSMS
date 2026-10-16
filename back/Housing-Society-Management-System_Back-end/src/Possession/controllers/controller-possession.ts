@@ -34,10 +34,6 @@ export const possessionController = {
         throw new AppError(400, 'File ID is required');
       }
 
-      if (!createData.plotId) {
-        throw new AppError(400, 'Plot ID is required');
-      }
-
       if (!createData.possessionInitDate) {
         throw new AppError(400, 'Application Date is required');
       }

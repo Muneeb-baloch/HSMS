@@ -271,6 +271,8 @@ export const validateRecordFeePayment = (): ValidationChain[] => [
     .trim()
     .isLength({ min: 3, max: 50 })
     .withMessage('Receipt number must be between 3 and 50 characters'),
+
+  body('payer').optional().isIn(['buyer', 'seller']).withMessage('Payer must be buyer or seller'),
 ];
 
 export const validateExecuteTransfer = (): ValidationChain[] => [

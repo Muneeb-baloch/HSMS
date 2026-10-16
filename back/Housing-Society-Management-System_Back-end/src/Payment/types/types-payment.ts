@@ -22,7 +22,7 @@ export interface PaymentType {
 export interface CreateReceiptParams {
   fileId: string | import('mongoose').Types.ObjectId;
   paidByMemId: string | import('mongoose').Types.ObjectId;
-  targetType: 'installment' | 'bill';
+  targetType: 'installment' | 'bill' | 'transfer';
   targetId: string | import('mongoose').Types.ObjectId;
   amount: number;
   paymentDate: Date | string;
@@ -37,6 +37,6 @@ export interface PaymentQueryParams {
   page?: number;
   limit?: number;
   fileId?: string;
-  targetType?: 'installment' | 'bill';
+  targetType?: 'installment' | 'bill' | 'transfer';
   targetId?: string;
 }

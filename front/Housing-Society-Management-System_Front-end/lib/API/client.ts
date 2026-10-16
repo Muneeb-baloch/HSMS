@@ -137,6 +137,19 @@ client.interceptors.request.use(
 client.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
+    // The backend's error middleware puts the human-readable reason on
+    // `error` (e.g. AppError validation/business-rule messages), not
+    // `message` - but most call sites across this app read
+    // `err.response.data.message`. Backfill it here once, so every existing
+    // and future `.data.message` read gets the real reason instead of
+    // silently falling back to a generic string.
+    if (error.response?.data && typeof error.response.data === "object") {
+      const data = error.response.data as { message?: string; error?: string };
+      if (!data.message && data.error) {
+        data.message = data.error;
+      }
+    }
+
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean;
     };

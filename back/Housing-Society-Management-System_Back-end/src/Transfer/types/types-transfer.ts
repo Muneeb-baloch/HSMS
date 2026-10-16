@@ -101,6 +101,8 @@ export interface RecordFeePaymentDto {
   paymentMethod: string;
   transactionId?: string;
   receiptNumber?: string;
+  /** Who the receipt is issued to - staff picks at the time of recording. Defaults to 'buyer'. */
+  payer?: 'buyer' | 'seller';
 }
 
 export interface ExecuteTransferDto {

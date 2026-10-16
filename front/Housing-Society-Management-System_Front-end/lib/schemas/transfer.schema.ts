@@ -68,6 +68,7 @@ export const feePaymentSchema = z.object({
   paymentMethod: z.enum(["Cash", "Bank Transfer", "Cheque", "Online Payment"]),
   transactionId: z.string().optional(),
   receiptNumber: z.string().optional(),
+  payer: z.enum(["buyer", "seller"]).default("buyer"),
 });
 
 export const executeTransferSchema = z.object({

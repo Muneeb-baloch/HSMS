@@ -67,6 +67,17 @@ const feePaymentFields: FieldConfig<FeePaymentFormData>[] = [
     type: 'text',
     required: false,
     placeholder: 'Enter receipt number'
+  },
+  {
+    name: 'payer',
+    label: 'Payer',
+    type: 'select',
+    required: true,
+    description: 'Who the fee receipt is issued to',
+    options: [
+      { label: 'Buyer', value: 'buyer' },
+      { label: 'Seller', value: 'seller' }
+    ]
   }
 ]
 
@@ -155,7 +166,8 @@ export default function FeePaymentPage () {
     paymentDate: new Date().toISOString().split('T')[0],
     paymentMethod: 'Cash',
     transactionId: '',
-    receiptNumber: ''
+    receiptNumber: '',
+    payer: 'buyer'
   }
 
   const handleSubmit = async (data: FeePaymentFormData) => {

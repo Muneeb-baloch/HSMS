@@ -27,7 +27,7 @@ router.get(
   '/by-target/:targetType/:targetId',
   authenticate,
   requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
-  param('targetType').isIn(['installment', 'bill']).withMessage('Invalid target type'),
+  param('targetType').isIn(['installment', 'bill', 'transfer']).withMessage('Invalid target type'),
   param('targetId').isMongoId().withMessage('Invalid target ID'),
   validateRequest,
   paymentController.getPaymentsByTarget

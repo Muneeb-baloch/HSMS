@@ -1,7 +1,16 @@
 import { Types } from 'mongoose';
 import Application from '../../Application/models/models-application';
+import { runInTransaction } from '../../common/services/areaAllocation.service';
+import {
+  getOverdueDuesForFile,
+  hasActivePossession,
+  isFileStatusBlocked,
+} from '../../common/services/fileEligibility.service';
+import { toDate } from '../../common/utils/dates';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
+import { paymentService } from '../../Payment/index-payment';
+import { PaymentTargetType } from '../../Payment/models/models-payment';
 import { AppError } from '../../middleware/error.middleware';
 
 import Nominee from '../../Nominee/models/models-nominee';
@@ -65,9 +74,31 @@ export const srTransferService = {
       throw new AppError(404, 'Buyer not found');
     }
 
+    // Buyer must be a different member from the seller
+    if (data.buyerMemId === data.sellerMemId) {
+      throw new AppError(400, 'Buyer must be a different member from the seller');
+    }
+
     // Check if file belongs to seller
     if (file.memId.toString() !== data.sellerMemId) {
       throw new AppError(400, 'File does not belong to the specified seller');
+    }
+
+    // File must not be in a blocked status (Cancelled, Suspended, Disputed)
+    if (isFileStatusBlocked(file.status)) {
+      throw new AppError(400, `Transfer is blocked: file status is ${file.status}`);
+    }
+
+    // File must have no overdue dues (NDC check) - every unpaid installment/bill
+    // row whose due date has already passed must be cleared first.
+    const overdueDues = await getOverdueDuesForFile(file._id);
+    if (overdueDues > 0) {
+      throw new AppError(400, `Outstanding overdue dues: Rs ${overdueDues.toLocaleString()}`);
+    }
+
+    // File must not have a possession in progress
+    if (await hasActivePossession(file._id)) {
+      throw new AppError(400, 'Transfer is blocked: file has a possession in progress');
     }
 
     // Check if application exists (if provided)
@@ -108,6 +139,7 @@ export const srTransferService = {
       transferFeePaid: false,
       transfIsAtt: data.transfIsAtt || false,
       status: TransferStatus.PENDING,
+      societyId: file.societyId,
       isActive: true,
       createdBy: userId,
       isDeleted: false,
@@ -299,35 +331,21 @@ export const srTransferService = {
       }
     }
 
-    const updateObj: any = {
-      ...data,
-      modifiedBy: userId,
-    };
-
-    // Handle status changes
+    // Completion must go through executeTransfer - that's the only path that
+    // enforces fee-paid/attachments/witness/officer and re-checks the NDC,
+    // file-status and possession-in-progress rules. A direct status edit here
+    // would bypass every one of those checks.
     if (
       data.status === TransferStatus.COMPLETED &&
       existingTransfer.status !== TransferStatus.COMPLETED
     ) {
-      // Update file ownership
-      await File.findByIdAndUpdate(existingTransfer.fileId, {
-        $set: {
-          memId: existingTransfer.buyerMemId,
-          nomineeId: existingTransfer.nomineeId,
-          modifiedBy: userId,
-        },
-      });
-
-      // Set execution date if not provided
-      if (!updateObj.transferExecutionDate) {
-        updateObj.transferExecutionDate = new Date();
-      }
-
-      // Set officer designation if not provided
-      if (!updateObj.officerDesignation && updateObj.officerName) {
-        updateObj.officerDesignation = 'Society Officer';
-      }
+      throw new AppError(400, 'Use the execute-transfer action to complete a transfer');
     }
+
+    const updateObj: any = {
+      ...data,
+      modifiedBy: userId,
+    };
 
     // Update fee paid date if fee status changes
     if (data.transferFeePaid === true && existingTransfer.transferFeePaid === false) {
@@ -393,12 +411,19 @@ export const srTransferService = {
     }
 
     if (transfer.transferFeePaid) {
-      throw new Error('Transfer fee already paid');
+      throw new AppError(400, 'Transfer fee already paid');
     }
+
+    // Staff picks who the receipt is issued to; buyer is the default (the
+    // incoming owner conventionally pays the transfer fee).
+    const payer = data.payer === 'seller' ? 'seller' : 'buyer';
+    const paidByMemId = payer === 'seller' ? transfer.sellerMemId : transfer.buyerMemId;
+
+    const paymentDate = toDate(data.paymentDate, 'paymentDate');
 
     const updateObj: any = {
       transferFeePaid: true,
-      transferFeePaidDate: data.paymentDate,
+      transferFeePaidDate: paymentDate,
       transferFeeAmount: data.amount,
       modifiedBy: userId,
       status:
@@ -406,14 +431,32 @@ export const srTransferService = {
     };
 
     // Add remarks about payment
-    const paymentRemark = `Fee paid: Rs. ${data.amount} via ${data.paymentMethod} on ${data.paymentDate.toLocaleDateString()}`;
+    const paymentRemark = `Fee paid: Rs. ${data.amount} via ${data.paymentMethod} on ${paymentDate.toLocaleDateString()} (payer: ${payer})${data.receiptNumber ? ` (Receipt ref: ${data.receiptNumber})` : ''}`;
     updateObj.remarks = transfer.remarks ? `${transfer.remarks}\n${paymentRemark}` : paymentRemark;
 
-    const updatedTransfer = await SrTransfer.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true }
-    )
+    // The transferFeePaid flag flip and the Payment receipt it produces must
+    // commit or fail together - same reasoning as installmentService.recordPayment.
+    await runInTransaction(async session => {
+      await SrTransfer.findByIdAndUpdate(id, { $set: updateObj }, { session });
+
+      await paymentService.createReceipt(
+        {
+          fileId: transfer.fileId,
+          paidByMemId,
+          targetType: PaymentTargetType.TRANSFER,
+          targetId: transfer._id,
+          amount: data.amount,
+          paymentDate,
+          paymentMode: data.paymentMethod,
+          transactionRefNo: data.transactionId,
+          receivedBy: userId,
+          societyId: transfer.societyId,
+        },
+        session
+      );
+    });
+
+    const updatedTransfer = await SrTransfer.findById(id)
       .populate('file', 'fileRegNo')
       .populate('transferType', 'typeName transferFee')
       .populate('seller', 'fullName')
@@ -436,20 +479,45 @@ export const srTransferService = {
     }
 
     if (transfer.status !== TransferStatus.APPROVED) {
-      throw new Error('Only approved transfers can be executed');
+      throw new AppError(400, 'Only approved transfers can be executed');
     }
 
     if (!transfer.transferFeePaid) {
-      throw new Error('Transfer fee must be paid before execution');
+      throw new AppError(400, 'Transfer fee must be paid before execution');
     }
 
     if (!transfer.transfIsAtt) {
-      throw new Error('Clearance certificates must be attached before execution');
+      throw new AppError(400, 'Clearance certificates must be attached before execution');
     }
+
+    const file = await File.findById(transfer.fileId);
+    if (!file || file.isDeleted) {
+      throw new AppError(404, 'File not found');
+    }
+
+    // Re-check the same eligibility rules enforced at creation - the file's
+    // state can change in the time between requesting and executing a transfer.
+    if (isFileStatusBlocked(file.status)) {
+      throw new AppError(400, `Transfer is blocked: file status is ${file.status}`);
+    }
+
+    const overdueDues = await getOverdueDuesForFile(file._id);
+    if (overdueDues > 0) {
+      throw new AppError(400, `Outstanding overdue dues: Rs ${overdueDues.toLocaleString()}`);
+    }
+
+    if (await hasActivePossession(file._id)) {
+      throw new AppError(400, 'Transfer is blocked: file has a possession in progress');
+    }
+
+    const buyer = await Member.findById(transfer.buyerMemId);
+    const buyerName = buyer ? (buyer as any).memName || (buyer as any).fullName : 'new owner';
+
+    const executionDate = toDate(data.executionDate, 'executionDate');
 
     const updateObj: any = {
       status: TransferStatus.COMPLETED,
-      transferExecutionDate: data.executionDate,
+      transferExecutionDate: executionDate,
       witness1Name: data.witness1Name,
       witness1CNIC: data.witness1CNIC,
       witness2Name: data.witness2Name,
@@ -460,21 +528,25 @@ export const srTransferService = {
     };
 
     // Add execution remarks
-    const executionRemark = `Executed on ${data.executionDate.toLocaleDateString()} by ${data.officerName} (${data.officerDesignation}). Witnesses: ${data.witness1Name}${data.witness2Name ? `, ${data.witness2Name}` : ''}`;
+    const executionRemark = `Executed on ${executionDate.toLocaleDateString()} by ${data.officerName} (${data.officerDesignation}). Witnesses: ${data.witness1Name}${data.witness2Name ? `, ${data.witness2Name}` : ''}`;
     updateObj.remarks = transfer.remarks
       ? `${transfer.remarks}\n${executionRemark}`
       : executionRemark;
 
-    // Update file ownership
+    // Update file ownership: buyer becomes the member. The old nominee is
+    // explicitly cleared here (not carried over from transfer.nomineeId) -
+    // the buyer must add their own nominee on the file post-transfer. Past
+    // Payment receipts are never rewritten, so paidByMemId on them keeps
+    // pointing at the seller - history is preserved automatically.
     await File.findByIdAndUpdate(transfer.fileId, {
       $set: {
         memId: transfer.buyerMemId,
-        nomineeId: transfer.nomineeId,
         modifiedBy: userId,
-        fileRemarks: transfer.file?.fileRemarks
-          ? `${transfer.file.fileRemarks}\nTransferred to ${transfer.buyer?.fullName} on ${data.executionDate.toLocaleDateString()}`
-          : `Transferred to ${transfer.buyer?.fullName} on ${data.executionDate.toLocaleDateString()}`,
+        fileRemarks: file.fileRemarks
+          ? `${file.fileRemarks}\nTransferred to ${buyerName} on ${executionDate.toLocaleDateString()}`
+          : `Transferred to ${buyerName} on ${executionDate.toLocaleDateString()}`,
       },
+      $unset: { nomineeId: '' },
     });
 
     const executedTransfer = await SrTransfer.findByIdAndUpdate(

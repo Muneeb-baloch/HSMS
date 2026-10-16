@@ -48,7 +48,8 @@ export interface Possession {
 
 export interface CreatePossessionDto {
   fileId: string;
-  plotId: string;
+  /** Ignored if provided - the plot is always derived server-side from the file. */
+  plotId?: string;
   possessionStatus?: PossessionStatus;
   possessionInitDate: Date;
   possessionSurveyPerson?: string;

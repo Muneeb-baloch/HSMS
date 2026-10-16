@@ -79,8 +79,10 @@ export const useCreatePossession = () => {
       customToast.success("Possession request created successfully");
       queryClient.invalidateQueries({ queryKey: ["possessions"] });
     },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to create possession");
+    onError: (error: any) => {
+      customToast.error(
+        error?.response?.data?.message || error?.message || "Failed to create possession",
+      );
     },
   });
 };

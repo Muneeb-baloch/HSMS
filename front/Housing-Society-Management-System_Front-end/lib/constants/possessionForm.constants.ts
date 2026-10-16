@@ -1,7 +1,20 @@
 // src/lib/constants/possessionForm.constants.ts
 import { FieldConfig } from "@/components/shared/EntityForm/EntityForm";
+import { apiClient } from "@/lib/API/client";
 import { PossessionFormData } from "@/lib/schemas/possession.schema";
+import { useForm } from "react-hook-form";
 
+const getId = (v: unknown): string | undefined =>
+  typeof v === "string"
+    ? v
+    : v && typeof v === "object" && "_id" in (v as object)
+      ? String((v as { _id: string })._id)
+      : undefined;
+
+// Fields for requesting a new possession. plotId is intentionally not a
+// user-editable field here - it's always derived from the selected file (see
+// fileId's onChange below) and rendered disabled, matching the backend rule
+// that the plot can never be chosen independently of the file.
 export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
   {
     name: "fileId",
@@ -11,9 +24,27 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
     placeholder: "Select file",
     relationship: {
       endpoint: "/file",
-      labelField: "fileNumber",
+      labelField: "fileRegNo",
       valueField: "_id",
       searchable: true,
+    },
+    onChange: (
+      value: unknown,
+      form: ReturnType<typeof useForm<PossessionFormData>>,
+    ) => {
+      const fileId = getId(value);
+      form.setValue("plotId", "");
+      if (!fileId) return;
+      apiClient
+        .get(`/file/${fileId}`)
+        .then((res) => {
+          const plotId = getId(res.data?.data?.plotId) ?? res.data?.data?.plotId;
+          if (plotId) form.setValue("plotId", String(plotId));
+        })
+        .catch(() => {
+          // Leave plotId empty - the create request will fail with the
+          // backend's own "File not found" message if this was a bad id.
+        });
     },
   },
   {
@@ -21,12 +52,12 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
     label: "Plot",
     type: "relationship",
     required: true,
-    placeholder: "Select plot",
+    disabled: true,
+    description: "Derived from the selected file - cannot be changed here",
     relationship: {
       endpoint: "/plots",
-      labelField: "plotNumber",
+      labelField: "plotNo",
       valueField: "_id",
-      searchable: true,
     },
   },
   {
@@ -41,56 +72,15 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
     label: "Handover CSR",
     type: "relationship",
     required: true,
-    placeholder: "Select CSR",
+    placeholder: "Select staff member",
     relationship: {
-      endpoint: "/users?role=csr",
-      labelField: "firstName",
-      valueField: "_id",
+      // Mounted under the v1 user routes (double "users" segment is the
+      // actual route: /api/v1/users + router.get('/users', ...)).
+      endpoint: "/v1/users/users",
+      labelField: "email",
+      valueField: "id",
       searchable: true,
     },
-  },
-  {
-    name: "possessionStatus",
-    label: "Status",
-    type: "select",
-    required: false,
-    options: [
-      { label: "Requested", value: "requested" },
-      { label: "Surveyed", value: "surveyed" },
-      { label: "Ready", value: "ready" },
-      { label: "Handed Over", value: "handed_over" },
-      { label: "Cancelled", value: "cancelled" },
-      { label: "On Hold", value: "on_hold" },
-    ],
-    placeholder: "Select status",
-  },
-  {
-    name: "possessionSurveyPerson",
-    label: "Survey Person",
-    type: "text",
-    required: false,
-    placeholder: "Enter survey person name",
-  },
-  {
-    name: "possessionSurveyDate",
-    label: "Survey Date",
-    type: "date",
-    required: false,
-    placeholder: "Select survey date",
-  },
-  {
-    name: "possessionCollectorName",
-    label: "Collector Name",
-    type: "text",
-    required: false,
-    placeholder: "Enter collector name",
-  },
-  {
-    name: "possessionCollectorNic",
-    label: "Collector CNIC",
-    type: "text",
-    required: false,
-    placeholder: "XXXXX-XXXXXXX-X or 13 digits",
   },
   {
     name: "possessionRemarks",

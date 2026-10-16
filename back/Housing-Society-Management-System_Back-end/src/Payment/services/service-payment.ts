@@ -5,6 +5,7 @@ import BillInfo, { BillStatus } from '../../BillI/models/models-bill-info';
 import Plot from '../../Plots/models/models-plot';
 import Member from '../../Member/models/models-member';
 import Society from '../../Society/models/models-society';
+import SrTransfer from '../../Transfer/models/models-transfer';
 import Payment, { generateReceiptNo } from '../models/models-payment';
 import { CreateReceiptParams, PaymentQueryParams } from '../types/types-payment';
 import { amountInWordsPKR } from '../utils/amountInWords';
@@ -141,6 +142,14 @@ export const paymentService = {
       if (bill) {
         const billTypeName = (bill.billTypeId as any)?.billTypeName || 'Bill';
         targetDescription = `${billTypeName} - ${bill.billMonth}`;
+      }
+    } else if (payment.targetType === 'transfer') {
+      const transfer = await SrTransfer.findById(payment.targetId)
+        .select('transferTypeId')
+        .populate('transferTypeId', 'typeName');
+      if (transfer) {
+        const typeName = (transfer.transferTypeId as any)?.typeName || 'Transfer';
+        targetDescription = `${typeName} Transfer Fee`;
       }
     }
 

@@ -1,22 +1,21 @@
-// src/app/(dashboard)/permissions/create/page.tsx
 'use client'
 
 import { EntityForm } from '@/components/shared/EntityForm/EntityForm'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { hasPermission, UserRole } from '@/lib/constants/roles'
-import { userPermissionFormFields } from '@/lib/constants/userpermissionForm.constants'
-import { useCreateUserPermission } from '@/lib/hooks/entities/useUserPermission'
+import { possessionFormFields } from '@/lib/constants/possessionForm.constants'
+import { useCreatePossession } from '@/lib/hooks/entities/usePossession'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { userPermissionSchema } from '@/lib/schemas/userpermission.schema'
-import { CreateUserPermissionDto } from '@/lib/types/userpermission'
+import { possessionSchema, PossessionFormData } from '@/lib/schemas/possession.schema'
+import { CreatePossessionDto } from '@/lib/types/possession'
 import { ArrowLeft } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-export default function CreatePermissionPage () {
+export default function CreatePossessionPage () {
   const router = useRouter()
   const { user } = useAuth()
-  const createMutation = useCreateUserPermission()
+  const createMutation = useCreatePossession()
 
   const canCreate =
     user &&
@@ -26,50 +25,81 @@ export default function CreatePermissionPage () {
     )
 
   if (!canCreate) {
-    router.push('/permissions')
-    return null
+    return (
+      <div className='p-6'>
+        <Card>
+          <CardHeader>
+            <CardTitle>Access Denied</CardTitle>
+            <CardDescription>
+              You don&apos;t have permission to create possession requests.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.back()}>
+              <ArrowLeft className='mr-2 h-4 w-4' />
+              Go Back
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
-  const handleSubmit = async (data: CreateUserPermissionDto) => {
+  const defaultValues: Partial<PossessionFormData> = {
+    possessionInitDate: new Date().toISOString().split('T')[0]
+  }
+
+  const handleSubmit = async (data: PossessionFormData) => {
     try {
-      await createMutation.mutateAsync(data)
-      router.push('/permissions')
-    } catch (error) {
-      console.error('Failed to create permission:', error)
+      const createData: CreatePossessionDto = {
+        fileId: data.fileId,
+        plotId: data.plotId,
+        possessionInitDate: data.possessionInitDate,
+        possessionHandoverCSR: data.possessionHandoverCSR,
+        possessionRemarks: data.possessionRemarks,
+        possessionLatitude: data.possessionLatitude,
+        possessionLongitude: data.possessionLongitude
+      }
+
+      await createMutation.mutateAsync(createData)
+      router.push('/possessions')
+    } catch {
+      // Blocking reason (e.g. "Outstanding dues: Rs 45,000", "Possession is
+      // blocked: plot is not possession-ready") is already toasted by
+      // useCreatePossession's onError - nothing further to do here.
     }
   }
 
   const handleCancel = () => {
-    router.push('/permissions')
+    router.back()
   }
 
   return (
-    <div className='space-y-1'>
-      <div className='flex items-center gap-2'>
-        <Button
-          variant='ghost'
-          size='sm'
-          onClick={() => router.back()}
-          className='mb-4'
-        >
+    <div className='p-6 space-y-6'>
+      <div>
+        <Button variant='ghost' onClick={() => router.back()} className='mb-4'>
           <ArrowLeft className='mr-2 h-4 w-4' />
-          Back
+          Back to Possessions
         </Button>
+
+        <h1 className='text-3xl font-bold'>Request Possession</h1>
+        <p className='text-gray-500 mt-2'>
+          The plot is derived from the selected file - the file must be fully paid and
+          possession-ready before a request can be created.
+        </p>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className='text-2xl'>Create New Permission</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className='pt-6'>
           <EntityForm
-            schema={userPermissionSchema}
-            fields={userPermissionFormFields}
+            schema={possessionSchema}
+            fields={possessionFormFields}
+            defaultValues={defaultValues as PossessionFormData}
             onSubmit={handleSubmit}
             onCancel={handleCancel}
-            isLoading={createMutation.isPending}
-            submitLabel='Create Permission'
+            submitLabel='Create Possession Request'
             cancelLabel='Cancel'
+            isLoading={createMutation.isPending}
           />
         </CardContent>
       </Card>

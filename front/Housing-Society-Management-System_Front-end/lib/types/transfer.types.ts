@@ -114,6 +114,8 @@ export interface RecordFeePaymentDto {
   paymentMethod: string;
   transactionId?: string;
   receiptNumber?: string;
+  /** Who the receipt is issued to - defaults to 'buyer' if omitted. */
+  payer?: "buyer" | "seller";
 }
 
 export interface ExecuteTransferDto {

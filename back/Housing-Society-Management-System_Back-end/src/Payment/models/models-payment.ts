@@ -3,6 +3,7 @@ import { ClientSession, Document, Model, Schema, Types, model } from 'mongoose';
 export enum PaymentTargetType {
   INSTALLMENT = 'installment',
   BILL = 'bill',
+  TRANSFER = 'transfer',
 }
 
 export interface IPayment extends Document {

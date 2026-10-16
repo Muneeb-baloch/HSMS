@@ -1,4 +1,12 @@
 import { Types } from 'mongoose';
+import {
+  getTotalOutstandingForFile,
+  hasPendingTransfer,
+  isFileStatusBlocked,
+} from '../../common/services/fileEligibility.service';
+import File from '../../File/models/models-file';
+import { AppError } from '../../middleware/error.middleware';
+import Plot from '../../Plots/models/models-plot';
 import Possession, { PossessionStatus } from '../models/models-possession';
 import {
   BulkStatusUpdateDto,
@@ -58,18 +66,54 @@ export const possessionService = {
    * Create new possession request
    */
   async createPossession(data: CreatePossessionDto, userId: Types.ObjectId): Promise<any> {
+    const file = await File.findById(data.fileId);
+    if (!file || file.isDeleted) {
+      throw new AppError(404, 'File not found');
+    }
+
+    // Plot is always derived from the file - never taken from the client,
+    // so a possession can't be requested against a plot other than the
+    // file's own.
+    const plotId = file.plotId;
+
+    // File must not be in a blocked status (Cancelled, Suspended, Disputed)
+    if (isFileStatusBlocked(file.status)) {
+      throw new AppError(400, `Possession is blocked: file status is ${file.status}`);
+    }
+
+    // File must not have a pending (non-terminal) transfer
+    if (await hasPendingTransfer(file._id)) {
+      throw new AppError(400, 'Possession is blocked: file has a pending transfer');
+    }
+
+    // File must be fully paid - zero outstanding across installments, fees and bills
+    const totalOutstanding = await getTotalOutstandingForFile(file._id);
+    if (totalOutstanding > 0) {
+      throw new AppError(400, `Outstanding dues: Rs ${totalOutstanding.toLocaleString()}`);
+    }
+
+    // Plot must be possession-ready
+    const plot = await Plot.findById(plotId);
+    if (!plot || plot.isDeleted) {
+      throw new AppError(404, 'Plot not found');
+    }
+    if (!plot.isPossessionReady) {
+      throw new AppError(400, 'Possession is blocked: plot is not possession-ready');
+    }
+
     // Generate possession code
     const possessionCode = await Possession.generatePossessionCode();
 
     // Check if plot already has an active possession request
     const existingPossession = await Possession.findOne({
-      plotId: new Types.ObjectId(data.plotId),
+      plotId,
       isDeleted: false,
       possessionStatus: { $nin: [PossessionStatus.CANCELLED, PossessionStatus.HANDED_OVER] },
     });
 
     if (existingPossession) {
-      throw new Error(
+      throw new AppError(
+        409,
         `Plot already has an active possession request (${existingPossession.possessionCode})`
       );
     }
@@ -77,8 +121,9 @@ export const possessionService = {
     const possessionData = {
       ...data,
       possessionCode,
-      fileId: new Types.ObjectId(data.fileId),
-      plotId: new Types.ObjectId(data.plotId),
+      fileId: file._id,
+      plotId,
+      societyId: file.societyId,
       possessionHandoverCSR: new Types.ObjectId(data.possessionHandoverCSR),
       possessionStatus: data.possessionStatus || PossessionStatus.REQUESTED,
       possessionIsCollected: false,

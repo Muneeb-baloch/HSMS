@@ -8,11 +8,8 @@ export const validateCreatePossession = [
     .isMongoId()
     .withMessage('Invalid File ID format'),
 
-  body('plotId')
-    .notEmpty()
-    .withMessage('Plot ID is required')
-    .isMongoId()
-    .withMessage('Invalid Plot ID format'),
+  // plotId is derived server-side from the file - not accepted from the client.
+  body('plotId').optional().isMongoId().withMessage('Invalid Plot ID format'),
 
   body('possessionInitDate')
     .notEmpty()

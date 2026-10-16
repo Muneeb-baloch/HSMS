@@ -20,7 +20,7 @@ export const usePaymentsByFile = (fileId: string) => {
 };
 
 export const usePaymentsByTarget = (
-  targetType: "installment" | "bill" | undefined,
+  targetType: "installment" | "bill" | "transfer" | undefined,
   targetId: string | undefined
 ) => {
   return useQuery({
