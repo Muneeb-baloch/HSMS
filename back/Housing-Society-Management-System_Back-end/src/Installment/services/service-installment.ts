@@ -3,6 +3,7 @@ import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
 import { runInTransaction } from '../../common/services/areaAllocation.service';
 import { AppError } from '../../middleware/error.middleware';
+import { paymentService } from '../../Payment/index-payment';
 
 import Plot from '../../Plots/models/models-plot';
 import { InstallmentCategory } from '../index-installment-category';
@@ -986,6 +987,13 @@ export const installmentService = {
       );
     }
 
+    // fileId is the only link to the paying member - installment itself
+    // never stores memId (see createInstallment's comments on why).
+    const file = await File.findById(installment.fileId);
+    if (!file || file.isDeleted) {
+      throw new Error('File not found');
+    }
+
     // paidDate arrives over HTTP/JSON as a string (RecordPaymentDto's `Date`
     // type is a TS-only lie) — coerce once so both the stored field and the
     // remark text below can safely call Date methods on it.
@@ -1014,11 +1022,33 @@ export const installmentService = {
       ? `${installment.installmentRemarks}\n${paymentRemark}`
       : paymentRemark;
 
+    // Balance/status update and the receipt it produces must commit or fail
+    // together - a payment that updates the ledger but loses its receipt
+    // (or vice versa) is exactly the kind of inconsistency a receipt system
+    // exists to prevent.
+    await runInTransaction(async session => {
+      await Installment.findByIdAndUpdate(id, { $set: updateObj }, { session });
+
+      await paymentService.createReceipt(
+        {
+          fileId: installment.fileId,
+          paidByMemId: file.memId,
+          targetType: 'installment',
+          targetId: installment._id,
+          amount: data.amountPaid,
+          paymentDate: paidDate,
+          paymentMode: data.paymentMode,
+          transactionRefNo: data.transactionRefNo,
+          receivedBy: userId,
+          remarks: data.remarks,
+          societyId: installment.societyId,
+        },
+        session
+      );
+    });
+
     const updatedInstallment = await populateFileMemberPlot(
-      Installment.findByIdAndUpdate(id, { $set: updateObj }, { new: true }).populate(
-        'installmentCategory',
-        'instCatName'
-      ),
+      Installment.findById(id).populate('installmentCategory', 'instCatName'),
       { fileSelect: 'fileRegNo', memberSelect: 'memName', plotSelect: 'plotNo' }
     );
 

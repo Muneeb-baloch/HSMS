@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
 import { AppError } from '../../middleware/error.middleware';
+import { runInTransaction } from '../../common/services/areaAllocation.service';
+import { paymentService } from '../../Payment/index-payment';
 import BillType from '../models/models-bill-type';
 import BillInfo, { BillStatus } from '../models/models-bill-info';
 import {
@@ -435,7 +437,30 @@ export const billInfoService = {
       updateObj.notes = bill.notes ? `${bill.notes}\n${data.notes}` : data.notes;
     }
 
-    const updatedBill = await BillInfo.findByIdAndUpdate(id, { $set: updateObj }, { new: true })
+    // Balance/status update and the receipt it produces must commit or fail
+    // together, same reasoning as Installment.recordPayment.
+    await runInTransaction(async session => {
+      await BillInfo.findByIdAndUpdate(id, { $set: updateObj }, { session });
+
+      await paymentService.createReceipt(
+        {
+          fileId: bill.fileId,
+          paidByMemId: bill.memId,
+          targetType: 'bill',
+          targetId: bill._id,
+          amount: data.paymentAmount,
+          paymentDate: data.paymentDate,
+          paymentMode: data.paymentMethod,
+          transactionRefNo: data.transactionId,
+          receivedBy: userId,
+          remarks: data.notes,
+          societyId: bill.societyId,
+        },
+        session
+      );
+    });
+
+    const updatedBill = await BillInfo.findById(id)
       .populate('billTypeId', 'billTypeName billTypeCategory')
       .populate('memId', 'memName fullName memNic mobileNo')
       .populate('fileId', 'fileRegNo');

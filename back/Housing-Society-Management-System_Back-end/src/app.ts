@@ -79,6 +79,7 @@ import { fileRoutes } from './File/index-file';
 import { uploadRoutes } from './imageUpload';
 import { ApiError } from './imageUpload/utils/error-handler';
 import { installmentRoutes } from './Installment/index-installment';
+import { paymentRoutes } from './Payment/index-payment';
 import { installmentCategoryRoutes } from './Installment/index-installment-category';
 import { installmentPlanDetailRoutes } from './Installment/index-installment-plan-detail';
 import { installmentPlanRoutes } from './Installment/index-installment-plan';
@@ -513,6 +514,8 @@ function setupRoutes(app: Application): void {
   app.use('/api/installment-plans', installmentPlanRoutes);
   app.use('/api/installment-plan-details', installmentPlanDetailRoutes);
   app.use('/api/installment', installmentRoutes);
+
+  app.use('/api/payment', paymentRoutes);
 
   app.use('/api/visitors', visitorRoutes);
 

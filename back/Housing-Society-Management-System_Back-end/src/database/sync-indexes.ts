@@ -28,6 +28,7 @@ import BillType from '../BillI/models/models-bill-type';
 import BillInfo from '../BillI/models/models-bill-info';
 import DefaulterWorkflow from '../Defaulter/models/models-defaulter-workflow';
 import PaymentMode from '../Payment/models/models-paymentmodule';
+import Payment from '../Payment/models/models-payment';
 
 const models = [
   { name: 'Plot', model: Plot },
@@ -41,6 +42,7 @@ const models = [
   { name: 'BillInfo', model: BillInfo },
   { name: 'DefaulterWorkflow', model: DefaulterWorkflow },
   { name: 'PaymentMode', model: PaymentMode },
+  { name: 'Payment', model: Payment },
 ];
 
 async function syncIndexes(): Promise<void> {
