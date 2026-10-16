@@ -7,6 +7,7 @@ import Member from '../../Member/models/models-member';
 import Society from '../../Society/models/models-society';
 import Payment, { generateReceiptNo } from '../models/models-payment';
 import { CreateReceiptParams, PaymentQueryParams } from '../types/types-payment';
+import { amountInWordsPKR } from '../utils/amountInWords';
 
 const toPlainObject = (doc: any): any => {
   const plainObj = doc.toObject ? doc.toObject() : doc;
@@ -157,6 +158,7 @@ export const paymentService = {
           }
         : null,
       targetDescription,
+      amountInWords: amountInWordsPKR(payment.amount),
     };
   },
 };
