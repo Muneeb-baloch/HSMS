@@ -223,15 +223,14 @@ export const installmentService = {
       throw new Error(`Installment number ${data.installmentNo} already exists for this file`);
     }
 
-    // totalPayable is computed by the Installment model itself
-    // (pre('validate') fills it in so the required-field check passes, then
-    // pre('save') unconditionally recalculates it along with
-    // balanceAmount/status/lateFeeSurcharge) - no need to precompute it here.
+    // Strip computed fields - totalPayable is ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { totalPayable, balanceAmount, status, ...safeData } = data as any;
+
     const installmentData: any = {
-      ...data,
+      ...safeData,
       societyId: (member as any).societyId,
       amountPaid: 0,
-      balanceAmount: data.amountDue + (data.lateFeeSurcharge || 0),
       status: InstallmentStatus.UNPAID,
       isDeleted: false,
       createdBy: userId,
@@ -281,12 +280,15 @@ export const installmentService = {
       throw new Error('Installment category not found');
     }
 
-    const installments: any[] = [];
+    // Use .create() for each installment to ensure pre('save') hooks run —
+    // insertMany() skips pre('save') where balanceAmount/status are computed.
+    const createdInstallments: any[] = [];
 
     for (let i = 1; i <= data.totalInstallments; i++) {
       const dueDate = calculateNextDueDate(data.startDate, data.frequency, i);
 
-      installments.push({
+      // Computed fields (totalPayable, balanceAmount, status) are ALWAYS recalculated by the model's pre('save') hook
+      const installment = await Installment.create({
         fileId: data.fileId,
         installmentCategoryId: data.installmentCategoryId,
         installmentNo: i,
@@ -296,17 +298,13 @@ export const installmentService = {
         dueDate,
         amountDue: data.amountPerInstallment,
         lateFeeSurcharge: 0,
-        totalPayable: data.amountPerInstallment,
         amountPaid: 0,
-        balanceAmount: data.amountPerInstallment,
-        status: InstallmentStatus.UNPAID,
         isDeleted: false,
         societyId: file.societyId,
         createdBy: userId,
       });
-    }
 
-    const createdInstallments = await Installment.insertMany(installments);
+      createdInstallments.push(installment);
 
     // Fetch created installments with populated data
     const installmentIds = createdInstallments.map(inst => inst._id);
@@ -605,8 +603,12 @@ export const installmentService = {
       }
     }
 
+    // Strip computed fields - totalPayable, balanceAmount, status are ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { totalPayable, balanceAmount, status, ...safeData } = data as any;
+
     const updateObj: any = {
-      ...data,
+      ...safeData,
       modifiedBy: userId,
     };
 

@@ -91,20 +91,24 @@ export const billInfoService = {
     // which is always true for a new doc) - no need to precompute it here.
 
     // Calculate units consumed if readings are provided
+    // Strip computed fields - totalPayable is ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { totalPayable, ...safeData } = data as any;
+
     let unitsConsumed: number | undefined;
-    if (data.currentReading !== undefined && data.previousReading !== undefined) {
-      unitsConsumed = data.currentReading - data.previousReading;
+    if (safeData.currentReading !== undefined && safeData.previousReading !== undefined) {
+      unitsConsumed = safeData.currentReading - safeData.previousReading;
       if (unitsConsumed < 0) unitsConsumed = 0;
     }
 
     const billData: any = {
-      ...data,
-      billTypeId: data.billTypeId,
+      ...safeData,
+      billTypeId: safeData.billTypeId,
       billAmount,
       unitsConsumed,
-      fineAmount: data.fineAmount || 0,
-      arrears: data.arrears || 0,
-      gracePeriodDays: data.gracePeriodDays || 7,
+      fineAmount: safeData.fineAmount || 0,
+      arrears: safeData.arrears || 0,
+      gracePeriodDays: safeData.gracePeriodDays || 7,
       createdBy: userId,
       isActive: true,
       isDeleted: false,
@@ -299,22 +303,14 @@ export const billInfoService = {
       }
     }
 
+    // Strip computed fields - totalPayable is ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { totalPayable, ...safeData } = data as any;
+
     const updateObj: any = {
-      ...data,
+      ...safeData,
       modifiedBy: userId,
     };
-
-    // Calculate total payable if amount fields are updated
-    if (
-      data.billAmount !== undefined ||
-      data.fineAmount !== undefined ||
-      data.arrears !== undefined
-    ) {
-      const billAmount = data.billAmount !== undefined ? data.billAmount : existingBill.billAmount;
-      const fineAmount = data.fineAmount !== undefined ? data.fineAmount : existingBill.fineAmount;
-      const arrears = data.arrears !== undefined ? data.arrears : existingBill.arrears;
-      updateObj.totalPayable = billAmount + fineAmount + arrears;
-    }
 
     // Calculate units consumed if readings are updated
     if (data.currentReading !== undefined || data.previousReading !== undefined) {

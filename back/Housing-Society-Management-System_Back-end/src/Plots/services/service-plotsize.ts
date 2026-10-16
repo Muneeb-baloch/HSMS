@@ -23,12 +23,12 @@ export const plotSizeService = {
    * Create new plot size
    */
   async createPlotSize(data: CreatePlotSizeDto, userId: Types.ObjectId): Promise<any> {
-    // standardBasePrice is computed by the PlotSize model itself
-    // (pre('validate') fills it in so the required-field check passes, then
-    // pre('save') unconditionally recalculates it) - no need to precompute
-    // it here.
+    // Strip computed fields - standardBasePrice is ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { standardBasePrice, ...safeData } = data as any;
+
     const plotSizeData = {
-      ...data,
+      ...safeData,
       createdBy: userId,
       updatedBy: userId,
     };
@@ -158,27 +158,15 @@ export const plotSizeService = {
     data: UpdatePlotSizeDto,
     userId: Types.ObjectId
   ): Promise<any | null> {
-    // If totalArea or ratePerUnit is being updated, ensure standardBasePrice is recalculated
-    if (data.totalArea !== undefined || data.ratePerUnit !== undefined) {
-      const existingPlotSize = await PlotSize.findById(id);
-      if (existingPlotSize) {
-        const totalArea =
-          data.totalArea !== undefined ? data.totalArea : existingPlotSize.totalArea;
-        const ratePerUnit =
-          data.ratePerUnit !== undefined ? data.ratePerUnit : existingPlotSize.ratePerUnit;
-
-        // Only update standardBasePrice if it wasn't explicitly provided
-        if (data.standardBasePrice === undefined) {
-          data.standardBasePrice = parseFloat((totalArea * ratePerUnit).toFixed(2));
-        }
-      }
-    }
+    // Strip computed fields - standardBasePrice is ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { standardBasePrice, ...safeData } = data as any;
 
     const plotSize = await PlotSize.findByIdAndUpdate(
       id,
       {
         $set: {
-          ...data,
+          ...safeData,
           updatedBy: userId,
         },
       },

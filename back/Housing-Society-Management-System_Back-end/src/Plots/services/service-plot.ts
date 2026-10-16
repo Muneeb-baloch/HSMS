@@ -89,15 +89,14 @@ export const plotService = {
     userId: Types.ObjectId,
     session?: ClientSession
   ): Promise<any> {
-    // plotArea/areaBase/plotTotalAmount are computed by the Plot model itself
-    // (pre('validate') fills them in so the required-field check passes, then
-    // pre('save') unconditionally recalculates all three) - no need to
-    // precompute them here.
+    // Strip computed fields - these are ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { plotArea, plotTotalAmount, areaBase, plotDimensions, ...safeData } = data as any;
 
     // Validate that project and block exist
     const [project, plotBlock] = await Promise.all([
-      Project.findById(data.projectId).session(session || null),
-      PlotBlock.findById(data.plotBlockId).session(session || null),
+      Project.findById(safeData.projectId).session(session || null),
+      PlotBlock.findById(safeData.plotBlockId).session(session || null),
     ]);
 
     if (!project) {
@@ -109,17 +108,17 @@ export const plotService = {
     }
 
     const plotData = {
-      ...data,
-      plotType: data.plotType,
-      projectId: new Types.ObjectId(data.projectId),
-      plotBlockId: new Types.ObjectId(data.plotBlockId),
-      plotSizeId: new Types.ObjectId(data.plotSizeId),
-      plotCategoryId: new Types.ObjectId(data.plotCategoryId),
-      salesStatusId: new Types.ObjectId(data.salesStatusId),
-      srDevStatId: data.srDevStatId ? new Types.ObjectId(data.srDevStatId) : undefined,
-      surchargeAmount: data.surchargeAmount || 0,
-      discountAmount: data.discountAmount || 0,
-      plotAreaUnit: data.plotAreaUnit || 'sqft',
+      ...safeData,
+      plotType: safeData.plotType,
+      projectId: new Types.ObjectId(safeData.projectId),
+      plotBlockId: new Types.ObjectId(safeData.plotBlockId),
+      plotSizeId: new Types.ObjectId(safeData.plotSizeId),
+      plotCategoryId: new Types.ObjectId(safeData.plotCategoryId),
+      salesStatusId: new Types.ObjectId(safeData.salesStatusId),
+      srDevStatId: safeData.srDevStatId ? new Types.ObjectId(safeData.srDevStatId) : undefined,
+      surchargeAmount: safeData.surchargeAmount || 0,
+      discountAmount: safeData.discountAmount || 0,
+      plotAreaUnit: safeData.plotAreaUnit || 'sqft',
       isPossessionReady: false,
       createdBy: userId,
       updatedBy: userId,
@@ -412,8 +411,12 @@ export const plotService = {
       throw new Error('Plot not found');
     }
 
+    // Strip computed fields - these are ALWAYS recalculated by the model,
+    // client values (including null) are ignored and unsafe to trust.
+    const { plotArea, plotTotalAmount, areaBase, plotDimensions, ...safeData } = data as any;
+
     // Prepare update data
-    const updateData: any = { ...data, updatedBy: userId };
+    const updateData: any = { ...safeData, updatedBy: userId };
 
     // Convert ObjectId fields if provided
     if (data.plotBlockId) {
