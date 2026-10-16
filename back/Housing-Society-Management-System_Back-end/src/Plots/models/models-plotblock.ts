@@ -106,7 +106,9 @@ const plotBlockSchema = new Schema<IPlotBlock>(
     },
   },
   {
-    timestamps: true, // This automatically creates createdAt and updatedAt
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
@@ -197,6 +199,14 @@ plotBlockSchema.pre('findOneAndUpdate', async function (next) {
   } catch (err: any) {
     next(err);
   }
+});
+
+// Virtual populate: get all active plots in this block
+plotBlockSchema.virtual('plots', {
+  ref: 'Plot',
+  localField: '_id',
+  foreignField: 'plotBlockId',
+  match: { isDeleted: false },
 });
 
 // Compound index for societyId

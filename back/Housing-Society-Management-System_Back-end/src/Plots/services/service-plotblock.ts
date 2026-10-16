@@ -75,9 +75,16 @@ export const plotBlockService = {
     // Execute queries
     const [plotBlocks, total] = await Promise.all([
       PlotBlock.find(query)
-        .populate('projectId', 'projName projectCode') // Added
+        .select('+plotBlockCode')
+        .populate('projectId', 'projName projectCode')
         .populate('createdBy', 'firstName lastName email')
         .populate('updatedBy', 'firstName lastName email')
+        .populate({
+          path: 'plots',
+          model: 'Plot',
+          match: { isDeleted: false },
+          select: '_id plotNo',
+        })
         .skip(skip)
         .limit(limit)
         .sort(sort)
