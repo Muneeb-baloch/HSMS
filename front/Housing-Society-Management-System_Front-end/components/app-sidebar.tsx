@@ -422,7 +422,18 @@ export function AppSidebar ({ ...props }: React.ComponentProps<typeof Sidebar>) 
     return result
   }, [pathname, sidebarConfig])
 
+  const configDefaultOpen = useMemo(() => {
+    if (!sidebarConfig) return {}
+
+    const result: Record<string, boolean> = {}
+    sidebarConfig.sections.forEach(section => {
+      if (section.defaultOpen) result[section.id] = true
+    })
+    return result
+  }, [sidebarConfig])
+
   const openSections = {
+    ...configDefaultOpen,
     ...computeActiveOpen,
     ...userToggles
   }
