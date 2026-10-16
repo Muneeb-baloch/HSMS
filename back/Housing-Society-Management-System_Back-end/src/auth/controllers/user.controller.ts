@@ -43,7 +43,7 @@ export const userController = {
     try {
       checkAdminPermission(req.user);
 
-      const { page = 1, limit = 10, search = '' } = req.query;
+      const { page = 1, limit = 10, search = '', excludeRoles = '' } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
 
       // Build query
@@ -54,6 +54,15 @@ export const userController = {
           { firstName: { $regex: search, $options: 'i' } },
           { lastName: { $regex: search, $options: 'i' } },
         ];
+      }
+      if (excludeRoles) {
+        const roles = String(excludeRoles)
+          .split(',')
+          .map(r => r.trim())
+          .filter(Boolean);
+        if (roles.length > 0) {
+          query.role = { $nin: roles };
+        }
       }
 
       // Execute parallel queries for better performance
@@ -75,6 +84,7 @@ export const userController = {
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
+            fullName: `${user.firstName} ${user.lastName}`.trim(),
             role: user.role,
             status: user.status,
             emailVerified: user.emailVerified,

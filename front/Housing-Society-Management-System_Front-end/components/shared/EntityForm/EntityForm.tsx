@@ -86,6 +86,8 @@ export interface FieldConfig<TFormData extends FieldValues> {
     valueField: string
     searchable?: boolean
     filter?: (item: unknown) => boolean
+    /** Field on each item to show as secondary/muted text under the label (e.g. a role) */
+    secondaryField?: string
 
     onCreate?: (data: unknown) => Promise<unknown>
     queryParams?:
@@ -678,6 +680,7 @@ export function EntityForm<TFormData extends FieldValues> ({
                       endpoint={endpoint}
                       labelField={labelField}
                       valueField={relationship.valueField}
+                      secondaryField={relationship.secondaryField}
                       placeholder={fieldConfig.placeholder}
                       disabled={fieldConfig.disabled || isLoading}
                       onCreate={relationship.onCreate}

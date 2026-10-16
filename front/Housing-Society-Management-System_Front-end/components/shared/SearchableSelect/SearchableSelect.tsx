@@ -30,6 +30,7 @@ import { useEffect, useState } from 'react'
 interface Option {
   value: string
   label: string
+  secondary?: string
 }
 
 interface SearchableSelectProps {
@@ -38,6 +39,8 @@ interface SearchableSelectProps {
   endpoint: string
   labelField: string
   valueField: string
+  /** Field on each item to show as secondary/muted text under the label (e.g. a role) */
+  secondaryField?: string
   placeholder?: string
   disabled?: boolean
   onCreate?: (data: unknown) => Promise<unknown>
@@ -45,6 +48,11 @@ interface SearchableSelectProps {
   /** When editing, pass pre-loaded label for the selected value (e.g. from populated API response) */
   initialOption?: { value: string; label: string }
 }
+
+const formatSecondary = (value: unknown): string =>
+  String(value)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
 
 // API Response Types
 interface ApiPagination {
@@ -78,6 +86,7 @@ export function SearchableSelect ({
   endpoint,
   labelField,
   valueField,
+  secondaryField,
   placeholder = 'Select...',
   disabled = false,
   onCreate,
@@ -163,15 +172,22 @@ export function SearchableSelect ({
 
   const options: Option[] = Array.isArray(data)
     ? data
-        .map((item: ApiResponseItem) => {
+        .map((item: ApiResponseItem): Option | null => {
           const rawValue =
             (item as Record<string, unknown>)[valueField] ?? item._id ?? item.id
           if (rawValue === undefined || rawValue === null) return null
+          const secondaryRaw = secondaryField
+            ? (item as Record<string, unknown>)[secondaryField]
+            : undefined
           return {
             value: String(rawValue),
             label: String(
               (item as Record<string, unknown>)[labelField] ?? 'Unnamed'
-            )
+            ),
+            secondary:
+              secondaryRaw === undefined || secondaryRaw === null
+                ? undefined
+                : formatSecondary(secondaryRaw)
           }
         })
         .filter((option): option is Option => option !== null)
@@ -210,7 +226,10 @@ export function SearchableSelect ({
   }, [value, options, labelField, endpoint, initialOption])
 
   const selectedOption = options.find(opt => opt.value === value)
-  const displayOption = selectedOption || (value && selectedItemLabel ? { value, label: selectedItemLabel } : initialOption) || null
+  const displayOption: Option | null =
+    selectedOption ||
+    (value && selectedItemLabel ? { value, label: selectedItemLabel } : initialOption) ||
+    null
 
   const handleCreate = async (data: unknown) => {
     if (!onCreate) return
@@ -255,6 +274,11 @@ export function SearchableSelect ({
               ) : displayOption ? (
                 <span className='font-medium text-foreground'>
                   {displayOption.label}
+                  {displayOption.secondary && (
+                    <span className='ml-1.5 text-xs text-muted-foreground'>
+                      ({displayOption.secondary})
+                    </span>
+                  )}
                 </span>
               ) : (
                 <span className='text-muted-foreground'>{placeholder}</span>
@@ -308,8 +332,13 @@ export function SearchableSelect ({
                           value === option.value ? 'opacity-100' : 'opacity-0'
                         )}
                       />
-                      <span className='flex-1 truncate font-medium'>
-                        {option.label}
+                      <span className='flex-1 truncate'>
+                        <span className='font-medium'>{option.label}</span>
+                        {option.secondary && (
+                          <span className='block text-xs text-muted-foreground'>
+                            {option.secondary}
+                          </span>
+                        )}
                       </span>
                     </CommandItem>
                   ))}

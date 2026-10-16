@@ -34,12 +34,20 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
     ) => {
       const fileId = getId(value);
       form.setValue("plotId", "");
+      form.setValue("memberName", "");
+      form.setValue("memberCnic", "");
       if (!fileId) return;
       apiClient
         .get(`/file/${fileId}`)
         .then((res) => {
           const plotId = getId(res.data?.data?.plotId) ?? res.data?.data?.plotId;
           if (plotId) form.setValue("plotId", String(plotId));
+
+          const member = res.data?.data?.member;
+          if (member && typeof member === "object") {
+            form.setValue("memberName", String(member.memName ?? ""));
+            form.setValue("memberCnic", String(member.memNic ?? ""));
+          }
         })
         .catch(() => {
           // Leave plotId empty - the create request will fail with the
@@ -61,6 +69,23 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
     },
   },
   {
+    name: "memberName",
+    label: "Member (Owner)",
+    type: "text",
+    required: false,
+    disabled: true,
+    placeholder: "Auto-filled from the selected file",
+    description: "Owner of the selected file - for confirmation only",
+  },
+  {
+    name: "memberCnic",
+    label: "Member CNIC",
+    type: "text",
+    required: false,
+    disabled: true,
+    placeholder: "Auto-filled from the selected file",
+  },
+  {
     name: "possessionInitDate",
     label: "Application Date",
     type: "date",
@@ -77,9 +102,12 @@ export const possessionFormFields: FieldConfig<PossessionFormData>[] = [
       // Mounted under the v1 user routes (double "users" segment is the
       // actual route: /api/v1/users + router.get('/users', ...)).
       endpoint: "/v1/users/users",
-      labelField: "email",
+      labelField: "fullName",
+      secondaryField: "role",
       valueField: "id",
       searchable: true,
+      // Handover CSR must be a staff member, not a member/guest account.
+      queryParams: { excludeRoles: "member,guest" },
     },
   },
   {

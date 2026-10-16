@@ -4,6 +4,8 @@ import * as z from "zod";
 export const possessionSchema = z.object({
   fileId: z.string().min(1, "File is required"),
   plotId: z.string().min(1, "Plot is required"),
+  memberName: z.string().optional(),
+  memberCnic: z.string().optional(),
   possessionInitDate: z.string().min(1, "Application Date is required"),
   possessionHandoverCSR: z.string().min(1, "Handover CSR is required"),
   possessionStatus: z.string().optional(),
