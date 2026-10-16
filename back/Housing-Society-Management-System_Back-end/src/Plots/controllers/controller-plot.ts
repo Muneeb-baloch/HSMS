@@ -16,7 +16,6 @@ import PlotSize from '../models/models-plotsize';
 import {
   BulkPlotUpdateDto,
   CreatePlotDto,
-  PlotAssignmentDto,
   PlotFilterOptions,
   PlotPriceCalculationDto,
   PlotQueryParams,
@@ -470,76 +469,6 @@ export const plotController = {
       res.json({
         success: true,
         data: priceCalculation,
-      });
-    } catch (error) {
-      handleError(error, next);
-    }
-  },
-
-  /**
-   * Assign plot to customer
-   */
-  assignPlotToCustomer: async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      if (!req.user) {
-        throw new AppError(401, 'Authentication required');
-      }
-
-      const assignmentData: PlotAssignmentDto = req.body;
-
-      if (!assignmentData.plotId) {
-        throw new AppError(400, 'Plot ID is required');
-      }
-
-      if (!assignmentData.fileId) {
-        throw new AppError(400, 'File ID is required');
-      }
-
-      if (!assignmentData.salesStatusId) {
-        throw new AppError(400, 'Sales Status ID is required');
-      }
-
-      if (!assignmentData.assignedBy) {
-        throw new AppError(400, 'Assigned By is required');
-      }
-
-      const plot = await plotService.assignPlotToCustomer(assignmentData, req.user.userId);
-
-      if (!plot) {
-        throw new AppError(404, 'Plot not found');
-      }
-
-      res.json({
-        success: true,
-        data: plot,
-        message: 'Plot assigned to customer successfully',
-      });
-    } catch (error) {
-      handleError(error, next);
-    }
-  },
-
-  /**
-   * Unassign plot from customer
-   */
-  unassignPlotFromCustomer: async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      if (!req.user) {
-        throw new AppError(401, 'Authentication required');
-      }
-
-      const plotId = req.params.id as string;
-
-      const plot = await plotService.unassignPlotFromCustomer(plotId, req.user.userId);
-
-      if (!plot) {
-        throw new AppError(404, 'Plot not found');
-      }
-
-      res.json({
-        success: true,
-        data: plot,
-        message: 'Plot unassigned from customer successfully',
       });
     } catch (error) {
       handleError(error, next);

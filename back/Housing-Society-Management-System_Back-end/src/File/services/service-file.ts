@@ -1,5 +1,5 @@
 // src/database/File/services/service-file.ts
-import { Types } from 'mongoose';
+import { ClientSession, Types } from 'mongoose';
 import Application from '../../Application/models/models-application';
 import { runInTransaction } from '../../common/services/areaAllocation.service';
 import { AppError } from '../../middleware/error.middleware';
@@ -17,6 +17,7 @@ import Member from '../../Member/models/models-member';
 import Nominee from '../../Nominee/models/models-nominee';
 import Plot from '../../Plots/models/models-plot';
 import Project from '../../Project/models/models-project';
+import SalesStatus, { SalesStatusType } from '../../Sales/models/models-salesstatus';
 import File, { FileStatus, PLOT_OCCUPYING_FILE_STATUSES } from '../models/models-file';
 import {
   AdjustFileDto,
@@ -43,6 +44,60 @@ const toPlainObject = (doc: any): FileType => {
 
   return plainObj as FileType;
 };
+
+/**
+ * Frees a plot back up when the file that was occupying it gets cancelled:
+ * clears Plot.fileId and reverts its sales status to "available" (if one is
+ * configured), mirroring the fileId it was set to on booking. Only touches
+ * the plot if its fileId still points at this exact file, so a plot that's
+ * already moved on to a different file (re-booked after an earlier
+ * cancellation) is never clobbered.
+ */
+async function clearPlotAssignment(
+  plotId: Types.ObjectId | string | undefined,
+  fileId: Types.ObjectId | string,
+  userId: Types.ObjectId,
+  sessionOpt?: { session: ClientSession }
+): Promise<void> {
+  if (!plotId) return;
+
+  const plot = await Plot.findOne({ _id: plotId, fileId }, null, sessionOpt);
+  if (!plot) return;
+
+  const availableStatus =
+    (await SalesStatus.findOne(
+      {
+        statusType: SalesStatusType.AVAILABLE,
+        isDeleted: false,
+        isActive: true,
+        societyId: plot.societyId,
+      },
+      null,
+      sessionOpt
+    )) ||
+    (await SalesStatus.findOne(
+      {
+        statusType: SalesStatusType.AVAILABLE,
+        isDeleted: false,
+        isActive: true,
+        societyId: { $exists: false },
+      },
+      null,
+      sessionOpt
+    ));
+
+  await Plot.findByIdAndUpdate(
+    plotId,
+    {
+      $set: {
+        updatedBy: userId,
+        ...(availableStatus ? { salesStatusId: availableStatus._id } : {}),
+      },
+      $unset: { fileId: '' },
+    },
+    sessionOpt
+  );
+}
 
 /**
  * Attaches the real, ledger-derived downPayment/balanceAmount/paymentPercentage
@@ -337,6 +392,46 @@ export const fileService = {
       }));
 
       await Installment.insertMany(installmentDocs, { ...sessionOpt, ordered: true });
+
+      // Booking occupies the plot - mirror that onto Plot.fileId (and its
+      // sales status, if a "booked" status is configured) in the same
+      // transaction as the File/Installment write. Plot.fileId is what
+      // markPossessionReady's legacy check and Plot.isAvailable read, so
+      // leaving it unset here is what caused bookings to look unassigned
+      // at the plot level.
+      const bookedStatus =
+        (await SalesStatus.findOne(
+          {
+            statusType: SalesStatusType.BOOKED,
+            isDeleted: false,
+            isActive: true,
+            societyId: plot.societyId,
+          },
+          null,
+          sessionOpt
+        )) ||
+        (await SalesStatus.findOne(
+          {
+            statusType: SalesStatusType.BOOKED,
+            isDeleted: false,
+            isActive: true,
+            societyId: { $exists: false },
+          },
+          null,
+          sessionOpt
+        ));
+
+      await Plot.findByIdAndUpdate(
+        plot._id,
+        {
+          $set: {
+            fileId: created._id,
+            updatedBy: userId,
+            ...(bookedStatus ? { salesStatusId: bookedStatus._id } : {}),
+          },
+        },
+        sessionOpt
+      );
 
       return created._id;
     });
@@ -731,7 +826,9 @@ export const fileService = {
       modifiedBy: userId,
     };
 
-    if (data.status === FileStatus.CANCELLED && existingFile.status !== FileStatus.CANCELLED) {
+    const isCancelling =
+      data.status === FileStatus.CANCELLED && existingFile.status !== FileStatus.CANCELLED;
+    if (isCancelling) {
       updateObj.cancellationDate = new Date();
     }
 
@@ -739,11 +836,18 @@ export const fileService = {
       updateObj.actualCompletionDate = new Date();
     }
 
-    const file = await File.findByIdAndUpdate(
-      id,
-      { $set: updateObj },
-      { new: true, runValidators: true }
-    )
+    if (isCancelling) {
+      // Cancelling a file and freeing its plot back up must commit together.
+      await runInTransaction(async session => {
+        const sessionOpt = session ? { session } : undefined;
+        await File.findByIdAndUpdate(id, { $set: updateObj }, { ...sessionOpt, runValidators: true });
+        await clearPlotAssignment(existingFile.plotId, id, userId, sessionOpt);
+      });
+    } else {
+      await File.findByIdAndUpdate(id, { $set: updateObj }, { runValidators: true });
+    }
+
+    const file = await File.findById(id)
       .populate('plan', 'planName totalMonths totalAmount projId')
       .populate('member', 'memName memNic mobileNo')
       .populate({
@@ -817,19 +921,24 @@ export const fileService = {
       throw new AppError(400, 'Cannot delete an active file');
     }
 
-    const result = await File.findByIdAndUpdate(
-      id,
-      {
-        $set: {
-          isDeleted: true,
-          deletedAt: new Date(),
-          isActive: false,
-          status: FileStatus.CANCELLED,
-          modifiedBy: userId,
+    const result = await runInTransaction(async session => {
+      const sessionOpt = session ? { session } : undefined;
+      const updated = await File.findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            isDeleted: true,
+            deletedAt: new Date(),
+            isActive: false,
+            status: FileStatus.CANCELLED,
+            modifiedBy: userId,
+          },
         },
-      },
-      { new: true }
-    );
+        { ...sessionOpt, new: true }
+      );
+      await clearPlotAssignment(existingFile.plotId, id, userId, sessionOpt);
+      return updated;
+    });
 
     return !!result;
   },

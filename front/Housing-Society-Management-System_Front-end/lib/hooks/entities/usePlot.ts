@@ -4,7 +4,6 @@ import { PaginatedResponse } from "@/lib/types/api";
 import {
   CreatePlotDto,
   Plot,
-  PlotAssignmentDto,
   PlotQueryParams,
   PlotStatistics,
   PlotType,
@@ -153,51 +152,6 @@ export const useDeletePlot = () => {
     },
     onError: (error: Error) => {
       customToast.error(error.message || "Failed to delete plot");
-    },
-  });
-};
-
-export const useAssignPlot = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (data: PlotAssignmentDto): Promise<Plot> => {
-      const response = await apiClient.post<Plot>("/plots/assign", data);
-
-      if (response.data.success) {
-        return response.data.data;
-      }
-      throw new Error(response.data.message || "Failed to assign plot");
-    },
-    onSuccess: () => {
-      customToast.success("Plot assigned successfully");
-      queryClient.invalidateQueries({ queryKey: ["plots"] });
-    },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to assign plot");
-    },
-  });
-};
-
-export const useUnassignPlot = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (id: string): Promise<Plot> => {
-      const response = await apiClient.post<Plot>(`/plots/${id}/unassign`, {});
-
-      if (response.data.success) {
-        return response.data.data;
-      }
-      throw new Error(response.data.message || "Failed to unassign plot");
-    },
-    onSuccess: (data, variables) => {
-      customToast.success("Plot unassigned successfully");
-      queryClient.invalidateQueries({ queryKey: ["plots"] });
-      queryClient.invalidateQueries({ queryKey: ["plot", variables] });
-    },
-    onError: (error: Error) => {
-      customToast.error(error.message || "Failed to unassign plot");
     },
   });
 };

@@ -1,6 +1,7 @@
 import { ClientSession, Types } from 'mongoose';
 import SrDevStatusModel from '../../Development/models/models-srdevstatus';
-import File from '../../File/models/models-file';
+import File, { PLOT_OCCUPYING_FILE_STATUSES } from '../../File/models/models-file';
+import { AppError } from '../../middleware/error.middleware';
 import Project from '../../Project/models/models-project';
 import SalesStatus from '../../Sales/models/models-salesstatus';
 import Plot, { IPlot, PlotType } from '../models/models-plot';
@@ -10,7 +11,6 @@ import PlotSize from '../models/models-plotsize';
 import {
   BulkPlotUpdateDto,
   CreatePlotDto,
-  PlotAssignmentDto,
   PlotFilterOptions,
   PlotPriceCalculationDto,
   PlotQueryParams,
@@ -588,87 +588,6 @@ export const plotService = {
   },
 
   /**
-   * Assign plot to customer (file)
-   */
-  async assignPlotToCustomer(
-    data: PlotAssignmentDto,
-    _userId: Types.ObjectId
-  ): Promise<any | null> {
-    const plot = await Plot.findById(data.plotId);
-
-    if (!plot) {
-      throw new Error('Plot not found');
-    }
-
-    if (plot.fileId) {
-      throw new Error('Plot is already assigned to a customer');
-    }
-
-    // Check if sales status allows assignment
-    const salesStatus = await SalesStatus.findById(data.salesStatusId);
-    if (!salesStatus?.allowsSale) {
-      throw new Error('Selected sales status does not allow plot assignment');
-    }
-
-    const updateData = {
-      fileId: new Types.ObjectId(data.fileId),
-      salesStatusId: new Types.ObjectId(data.salesStatusId),
-      updatedBy: new Types.ObjectId(data.assignedBy),
-    };
-
-    const updatedPlot = await Plot.findByIdAndUpdate(
-      data.plotId,
-      { $set: updateData },
-      { new: true }
-    )
-      .populate('projectId', 'projName projCode')
-      .populate('plotBlockId', 'plotBlockName')
-      .populate('plotSizeId', 'plotSizeName totalArea')
-      .populate('plotCategoryId', 'categoryName')
-      .populate('salesStatusId', 'statusName statusCode')
-      .populate('fileId', 'fileNumber customerName customerCnic');
-
-    if (!updatedPlot) return null;
-
-    // Update project plot counts
-    // Plot counts now calculated dynamically per project
-
-    return updatedPlot.toObject();
-  },
-
-  /**
-   * Unassign plot from customer
-   */
-  async unassignPlotFromCustomer(plotId: string, userId: Types.ObjectId): Promise<any | null> {
-    const plot = await Plot.findById(plotId);
-
-    if (!plot) {
-      throw new Error('Plot not found');
-    }
-
-    if (!plot.fileId) {
-      throw new Error('Plot is not assigned to any customer');
-    }
-
-    const updateData = {
-      fileId: null,
-      salesStatusId: null, // Reset to default available status
-      updatedBy: userId,
-    };
-
-    const updatedPlot = await Plot.findByIdAndUpdate(plotId, { $set: updateData }, { new: true })
-      .populate('projectId', 'projName projCode')
-      .populate('plotBlockId', 'plotBlockName');
-
-    if (!updatedPlot) return null;
-
-    // Update project plot counts
-    // Plot counts now calculated dynamically per project
-
-    return updatedPlot.toObject();
-  },
-
-  /**
    * Get available plots
    */
   async getAvailablePlots(projectId?: string, blockId?: string): Promise<any[]> {
@@ -770,18 +689,27 @@ export const plotService = {
     const plot = await Plot.findById(plotId);
 
     if (!plot) {
-      throw new Error('Plot not found');
+      throw new AppError(404, 'Plot not found');
     }
 
-    if (!plot.fileId) {
-      throw new Error('Plot must be assigned to a customer first');
+    // Plot.fileId is a denormalized mirror that can be stale/unset on older
+    // bookings - the real source of truth for "is a customer booked on this
+    // plot" is the same one the uniq_active_file_per_plot index uses: an
+    // active File pointing at this plot.
+    const activeFile = await File.findOne({
+      plotId: plot._id,
+      isDeleted: false,
+      status: { $in: PLOT_OCCUPYING_FILE_STATUSES },
+    });
+    if (!activeFile) {
+      throw new AppError(400, 'This plot has no active booking. Book it through Files first.');
     }
 
     // Check if development status is appropriate
     if (plot.srDevStatId) {
       const devStatus = await SrDevStatusModel.findById(plot.srDevStatId);
       if (devStatus?.devPhase !== 'completion') {
-        throw new Error('Plot development status must be completion phase');
+        throw new AppError(400, 'Plot development status must be completion phase');
       }
     }
 

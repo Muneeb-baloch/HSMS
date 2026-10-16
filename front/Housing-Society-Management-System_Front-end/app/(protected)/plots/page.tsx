@@ -100,10 +100,6 @@ export default function PlotsPage () {
     dispatch(setFilters({ page }))
   }
 
-  const handleAssignPlot = (row: any) => {
-    router.push(`/plots/assign/${row._id}`)
-  }
-
   const handleMarkPossessionReady = async (row: any) => {
     if (await confirm({ title: "Confirm", description: 'Mark this plot as possession ready?' })) {
       try {
@@ -206,13 +202,6 @@ export default function PlotsPage () {
           icon: <span>👁️</span>,
           onClick: (row: any) => handleView(row._id),
           variant: 'outline' as const
-        },
-        {
-          label: 'Assign to Customer',
-          icon: <span>👤</span>,
-          onClick: (row: any) => handleAssignPlot(row),
-          variant: 'secondary' as const,
-          showWhen: (row: any) => !row.fileId && canUpdate
         },
         {
           label: 'Mark Possession Ready',

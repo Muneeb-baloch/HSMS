@@ -6,7 +6,6 @@ import {
   validateBulkPlotUpdate,
   validateCreatePlot,
   validateGetPlots,
-  validatePlotAssignment,
   validatePlotDocuments,
   validatePriceCalculation,
   validateUpdatePlot,
@@ -58,21 +57,6 @@ router.delete(
 );
 
 // Plot management routes
-router.post(
-  '/assign',
-  authenticate,
-  requireRole(UserRole.MEMBER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MEMBER),
-  validatePlotAssignment,
-  plotController.assignPlotToCustomer
-);
-
-router.post(
-  '/:id/unassign',
-  authenticate,
-  requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
-  plotController.unassignPlotFromCustomer
-);
-
 router.post(
   '/:id/possession-ready',
   authenticate,

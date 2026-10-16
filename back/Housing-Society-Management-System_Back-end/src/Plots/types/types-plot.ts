@@ -170,14 +170,6 @@ export interface PlotPriceCalculationDto {
   discountAmount?: number;
 }
 
-export interface PlotAssignmentDto {
-  plotId: string;
-  fileId: string;
-  salesStatusId: string;
-  assignedBy: string;
-  remarks?: string;
-}
-
 export interface BulkPlotUpdateDto {
   plotIds: string[];
   field: 'salesStatusId' | 'srDevStatId' | 'isPossessionReady' | 'plotCategoryId';

@@ -16,7 +16,6 @@ export {
   validateBulkPlotUpdate,
   validateCreatePlot,
   validateGetPlots,
-  validatePlotAssignment,
   validatePlotDocuments,
   validatePriceCalculation,
   validateUpdatePlot,

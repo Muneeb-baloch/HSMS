@@ -448,14 +448,6 @@ export default function ViewPlotPage () {
                   <DialogTitle>Plot Actions</DialogTitle>
                 </DialogHeader>
                 <div className='space-y-3'>
-                  {!plot.fileId && (
-                    <Button
-                      onClick={() => router.push(`/plots/assign/${id}`)}
-                      className='w-full'
-                    >
-                      Assign to Customer
-                    </Button>
-                  )}
                   {plot.fileId && !plot.isPossessionReady && (
                     <Button
                       onClick={() =>

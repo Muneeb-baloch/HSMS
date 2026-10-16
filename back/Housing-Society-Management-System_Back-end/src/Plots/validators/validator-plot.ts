@@ -280,32 +280,6 @@ export const validatePriceCalculation = [
   body('discountAmount').optional().isFloat({ min: 0 }).withMessage('Discount cannot be negative'),
 ];
 
-export const validatePlotAssignment = [
-  body('plotId')
-    .notEmpty()
-    .withMessage('Plot ID is required')
-    .isMongoId()
-    .withMessage('Invalid Plot ID format'),
-
-  body('fileId')
-    .notEmpty()
-    .withMessage('File ID is required')
-    .isMongoId()
-    .withMessage('Invalid File ID format'),
-
-  body('salesStatusId')
-    .notEmpty()
-    .withMessage('Sales Status ID is required')
-    .isMongoId()
-    .withMessage('Invalid Sales Status ID format'),
-
-  body('assignedBy')
-    .notEmpty()
-    .withMessage('Assigned By is required')
-    .isMongoId()
-    .withMessage('Invalid User ID format'),
-];
-
 export const validateBulkPlotUpdate = [
   body('plotIds')
     .notEmpty()
