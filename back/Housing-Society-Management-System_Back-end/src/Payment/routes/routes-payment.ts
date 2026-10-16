@@ -34,6 +34,13 @@ router.get(
 );
 
 router.get(
+  '/trend',
+  authenticate,
+  requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  paymentController.getMonthlyTrend
+);
+
+router.get(
   '/:id/pdf',
   authenticate,
   requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),

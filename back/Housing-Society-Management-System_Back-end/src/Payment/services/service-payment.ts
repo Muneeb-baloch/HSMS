@@ -1,7 +1,7 @@
 import { ClientSession, Types } from 'mongoose';
 import File from '../../File/models/models-file';
-import Installment from '../../Installment/models/models-installment';
-import BillInfo from '../../BillI/models/models-bill-info';
+import Installment, { InstallmentStatus } from '../../Installment/models/models-installment';
+import BillInfo, { BillStatus } from '../../BillI/models/models-bill-info';
 import Plot from '../../Plots/models/models-plot';
 import Member from '../../Member/models/models-member';
 import Society from '../../Society/models/models-society';
@@ -160,5 +160,91 @@ export const paymentService = {
       targetDescription,
       amountInWords: amountInWordsPKR(payment.amount),
     };
+  },
+
+  /**
+   * Collected (from the Payment ledger) vs due (from Installment/BillInfo
+   * totalPayable on their dueDate) by calendar month, for the dashboard
+   * trend chart. Always returns exactly `months` trailing points, including
+   * months with no activity, so the chart has a continuous x-axis.
+   */
+  async getMonthlyTrend(
+    months = 12
+  ): Promise<{ monthKey: string; month: string; collected: number; due: number }[]> {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+
+    const [collectedAgg, dueInstallmentAgg, dueBillAgg] = await Promise.all([
+      Payment.aggregate([
+        { $match: { isDeleted: false, reversed: false, paymentDate: { $gte: start } } },
+        {
+          $group: {
+            _id: { year: { $year: '$paymentDate' }, month: { $month: '$paymentDate' } },
+            amount: { $sum: '$amount' },
+          },
+        },
+      ]),
+      Installment.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            status: { $nin: [InstallmentStatus.CANCELLED, InstallmentStatus.REFUNDED] },
+            dueDate: { $gte: start },
+          },
+        },
+        {
+          $group: {
+            _id: { year: { $year: '$dueDate' }, month: { $month: '$dueDate' } },
+            amount: { $sum: '$totalPayable' },
+          },
+        },
+      ]),
+      BillInfo.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            status: { $ne: BillStatus.CANCELLED },
+            dueDate: { $gte: start },
+          },
+        },
+        {
+          $group: {
+            _id: { year: { $year: '$dueDate' }, month: { $month: '$dueDate' } },
+            amount: { $sum: '$totalPayable' },
+          },
+        },
+      ]),
+    ]);
+
+    const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
+
+    const collectedByMonth = new Map<string, number>(
+      collectedAgg.map(r => [monthKey(r._id.year, r._id.month), r.amount])
+    );
+
+    const dueByMonth = new Map<string, number>();
+    for (const r of [...dueInstallmentAgg, ...dueBillAgg]) {
+      const key = monthKey(r._id.year, r._id.month);
+      dueByMonth.set(key, (dueByMonth.get(key) || 0) + r.amount);
+    }
+
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+
+    const result = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = monthKey(d.getFullYear(), d.getMonth() + 1);
+      result.push({
+        monthKey: key,
+        month: `${monthNames[d.getMonth()]} ${d.getFullYear()}`,
+        collected: collectedByMonth.get(key) || 0,
+        due: dueByMonth.get(key) || 0,
+      });
+    }
+
+    return result;
   },
 };

@@ -61,6 +61,16 @@ export const paymentController = {
     }
   },
 
+  getMonthlyTrend: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const months = req.query.months ? parseInt(req.query.months as string) : 12;
+      const trend = await paymentService.getMonthlyTrend(months);
+      res.json({ success: true, data: trend });
+    } catch (error) {
+      handleError(error, next);
+    }
+  },
+
   getReceiptPdf: async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
