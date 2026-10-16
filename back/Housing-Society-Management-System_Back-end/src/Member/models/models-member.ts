@@ -383,6 +383,12 @@ memberSchema.virtual('isLocked').get(function (this: IMember) {
   return !!(this.lockUntil && this.lockUntil > new Date());
 });
 
+// Virtual combining name + CNIC into one display label ("Name · CNIC") for
+// picker/combobox UIs, so the frontend doesn't need to compose it itself.
+memberSchema.virtual('memberLabel').get(function (this: IMember) {
+  return this.memNic ? `${this.memName} · ${this.memNic}` : this.memName;
+});
+
 // Compound index for efficient signup verification (CNIC + Email)
 // This speeds up the query: {memNic: X, memContEmail: Y, isDeleted: false, isActive: true}
 memberSchema.index(

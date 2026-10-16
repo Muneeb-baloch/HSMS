@@ -112,6 +112,7 @@ export const memberController = {
         memIsOverseas: req.query.memIsOverseas === 'true',
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
+        excludeId: req.query.excludeId as string,
       };
 
       const result = await memberService.getMembers(queryParams);

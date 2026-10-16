@@ -20,6 +20,7 @@ import Project from '../../Project/models/models-project';
 import File, { FileStatus, PLOT_OCCUPYING_FILE_STATUSES } from '../models/models-file';
 import {
   AdjustFileDto,
+  ChangeNomineeDto,
   CreateFileDto,
   FileDashboardSummary,
   FileQueryParams,
@@ -751,6 +752,48 @@ export const fileService = {
           select: 'projName projCode',
         },
       })
+      .populate('modifiedBy', 'firstName lastName email');
+
+    if (!file) return null;
+    const [withFinancials] = await attachFinancials([toPlainObject(file)]);
+    return withFinancials;
+  },
+
+  /**
+   * Change (or clear) the nominee on a file. Only a nominee belonging to the
+   * file's CURRENT member may be set - this is the one place that enforces
+   * that rule for files, since the generic updateFile path does not.
+   */
+  async changeNominee(
+    id: string,
+    data: ChangeNomineeDto,
+    userId: Types.ObjectId
+  ): Promise<FileType | null> {
+    const existingFile = await File.findById(id);
+    if (!existingFile || existingFile.isDeleted) {
+      throw new AppError(404, 'File not found');
+    }
+
+    const updateObj: any = { modifiedBy: userId };
+
+    if (data.nomineeId) {
+      const nominee = await Nominee.findById(data.nomineeId);
+      if (!nominee || nominee.isDeleted) {
+        throw new AppError(404, 'Nominee not found');
+      }
+      if (nominee.memId.toString() !== existingFile.memId.toString()) {
+        throw new AppError(400, "Nominee does not belong to the file's current member");
+      }
+      updateObj.nomineeId = data.nomineeId;
+    }
+
+    const file = await File.findByIdAndUpdate(
+      id,
+      data.nomineeId ? { $set: updateObj } : { $set: { modifiedBy: userId }, $unset: { nomineeId: '' } },
+      { new: true, runValidators: true }
+    )
+      .populate('member', 'memName memNic mobileNo')
+      .populate('nominee', 'nomineeName relationWithMember nomineeCNIC nomineeContact')
       .populate('modifiedBy', 'firstName lastName email');
 
     if (!file) return null;

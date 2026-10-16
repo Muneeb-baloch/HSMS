@@ -143,6 +143,8 @@ export interface MemberQueryParams {
   isActive?: boolean;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  /** Exclude this member from results - e.g. a buyer picker excluding the seller on the same transfer */
+  excludeId?: string;
 }
 
 export interface LoginCredentials {

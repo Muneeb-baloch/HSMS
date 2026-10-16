@@ -191,18 +191,31 @@ export const memberService = {
     const query: any = { isDeleted: false };
 
     if (search) {
-      query.$or = [
+      const orConditions: any[] = [
         { memName: { $regex: search, $options: 'i' } },
         { memNic: { $regex: search, $options: 'i' } },
         { memContMob: { $regex: search, $options: 'i' } },
         { memContEmail: { $regex: search, $options: 'i' } },
         { memRegNo: { $regex: search, $options: 'i' } },
       ];
+
+      // CNIC is stored dashed (XXXXX-XXXXXXX-X). If the query looks like a
+      // CNIC fragment (digits, optionally with dashes), also match memNic
+      // with an optional dash between every digit, so a search typed without
+      // dashes still finds the dashed stored value (and vice versa).
+      const digitsOnly = search.replace(/-/g, '');
+      if (/^\d{3,}$/.test(digitsOnly)) {
+        const dashTolerant = digitsOnly.split('').join('-?');
+        orConditions.push({ memNic: { $regex: dashTolerant } });
+      }
+
+      query.$or = orConditions;
     }
 
     if (statusId) query.statusId = new Types.ObjectId(statusId);
     if (cityId) query.cityId = new Types.ObjectId(cityId);
     if (params.societyId) query.societyId = new Types.ObjectId(params.societyId);
+    if (params.excludeId) query._id = { $ne: new Types.ObjectId(params.excludeId) };
 
     // memIsOverseas handling - only if no search
     if (memIsOverseas !== undefined && !search) {

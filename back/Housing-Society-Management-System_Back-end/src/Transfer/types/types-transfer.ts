@@ -59,7 +59,8 @@ export interface CreateSrTransferDto {
   applicationId?: string;
 
   ndcDocPath?: string; // NEW
-  transferFeeAmount?: number;
+  // transferFeeAmount is NOT accepted from the client on create - it's
+  // always derived server-side from the selected TransferType.transferFee.
   transferInitDate: Date;
   witness1Name?: string; // NEW
   witness1CNIC?: string; // NEW

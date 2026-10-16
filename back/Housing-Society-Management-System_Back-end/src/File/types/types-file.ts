@@ -147,6 +147,12 @@ export interface TransferFileDto {
   transferRemarks?: string;
 }
 
+export interface ChangeNomineeDto {
+  // Omitted/empty clears the file's nominee. When present, must belong to
+  // the file's current member - enforced in fileService.changeNominee.
+  nomineeId?: string;
+}
+
 export interface AdjustFileDto {
   adjustmentType: 'REFUND' | 'CREDIT' | 'TRANSFER';
   adjustmentAmount: number;

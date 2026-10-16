@@ -134,8 +134,14 @@ export const srTransferService = {
       throw new AppError(409, 'File already has a pending transfer');
     }
 
+    // transferFeeAmount is a computed field - it always comes from the
+    // selected Transfer Type, never from the client (the create form shows
+    // it read-only for the same reason).
+    const { transferFeeAmount: _ignoredFee, ...safeData } = data as any;
+
     const transferData: any = {
-      ...data,
+      ...safeData,
+      transferFeeAmount: transferType.transferFee,
       transferFeePaid: false,
       transfIsAtt: data.transfIsAtt || false,
       status: TransferStatus.PENDING,
@@ -144,11 +150,6 @@ export const srTransferService = {
       createdBy: userId,
       isDeleted: false,
     };
-
-    // Calculate transfer fee if not provided
-    if (!transferData.transferFeeAmount) {
-      transferData.transferFeeAmount = transferType.transferFee;
-    }
 
     const transfer = await SrTransfer.create(transferData);
 
@@ -533,12 +534,13 @@ export const srTransferService = {
       ? `${transfer.remarks}\n${executionRemark}`
       : executionRemark;
 
-    // Update file ownership: buyer becomes the member. The old nominee is
-    // explicitly cleared here (not carried over from transfer.nomineeId) -
-    // the buyer must add their own nominee on the file post-transfer. Past
-    // Payment receipts are never rewritten, so paidByMemId on them keeps
-    // pointing at the seller - history is preserved automatically.
-    await File.findByIdAndUpdate(transfer.fileId, {
+    // Update file ownership: buyer becomes the member. The seller's old
+    // nominee never carries over - File.nomineeId is set to transfer.nomineeId
+    // (already validated at create/update time to belong to the buyer), or
+    // cleared if none was named. Past Payment receipts are never rewritten,
+    // so paidByMemId on them keeps pointing at the seller - history is
+    // preserved automatically.
+    const fileUpdate: any = {
       $set: {
         memId: transfer.buyerMemId,
         modifiedBy: userId,
@@ -546,8 +548,14 @@ export const srTransferService = {
           ? `${file.fileRemarks}\nTransferred to ${buyerName} on ${executionDate.toLocaleDateString()}`
           : `Transferred to ${buyerName} on ${executionDate.toLocaleDateString()}`,
       },
-      $unset: { nomineeId: '' },
-    });
+    };
+    if (transfer.nomineeId) {
+      fileUpdate.$set.nomineeId = transfer.nomineeId;
+    } else {
+      fileUpdate.$unset = { nomineeId: '' };
+    }
+
+    await File.findByIdAndUpdate(transfer.fileId, fileUpdate);
 
     const executedTransfer = await SrTransfer.findByIdAndUpdate(
       id,

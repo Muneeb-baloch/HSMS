@@ -281,6 +281,13 @@ export const validateAdjustFile = (): ValidationChain[] => [
     .withMessage('Remarks cannot exceed 500 characters'),
 ];
 
+export const validateChangeNominee = (): ValidationChain[] => [
+  body('nomineeId')
+    .optional({ values: 'falsy' })
+    .isMongoId()
+    .withMessage('Invalid Nominee ID'),
+];
+
 export const validateAssignPlot = (): ValidationChain[] => [
   body('plotId')
     .notEmpty()

@@ -29,10 +29,8 @@ export const validateCreateTransfer = (): ValidationChain[] => [
 
   body('ndcDocPath').optional().isString().withMessage('Invalid NDC document path'),
 
-  body('transferFeeAmount')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Transfer fee must be a positive number'),
+  // transferFeeAmount is not accepted here - it's always derived server-side
+  // from the selected TransferType.transferFee (see service-transfer.ts).
 
   body('transferInitDate')
     .notEmpty()

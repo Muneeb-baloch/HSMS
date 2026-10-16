@@ -4,6 +4,7 @@ import { AppError } from '../../middleware/error.middleware';
 import { fileService } from '../services/service-file';
 import {
   AdjustFileDto,
+  ChangeNomineeDto,
   CreateFileDto,
   FileQueryParams,
   TransferFileDto,
@@ -176,6 +177,34 @@ export const fileController = {
         success: true,
         data: updatedFile,
         message: 'File updated successfully',
+      });
+    } catch (error) {
+      handleError(error, next);
+    }
+  },
+
+  /**
+   * Change (or clear) the file's nominee
+   */
+  changeNominee: async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        throw new AppError(401, 'Authentication required');
+      }
+
+      const id = req.params.id as string;
+      const changeData: ChangeNomineeDto = req.body;
+
+      const updatedFile = await fileService.changeNominee(id, changeData, req.user.userId);
+
+      if (!updatedFile) {
+        throw new AppError(404, 'File not found');
+      }
+
+      res.json({
+        success: true,
+        data: updatedFile,
+        message: 'Nominee updated successfully',
       });
     } catch (error) {
       handleError(error, next);

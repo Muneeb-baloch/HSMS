@@ -8,6 +8,7 @@ import {
   validateAdjustFile,
   validateAssignPlot,
   validateBulkUpdateStatus,
+  validateChangeNominee,
   validateCreateFile,
   validateGetFiles,
   validateMemIdParam,
@@ -134,6 +135,16 @@ router.put(
   validateUpdateFile(),
   validateRequest,
   fileController.updateFile
+);
+
+router.post(
+  '/:id/change-nominee',
+  authenticate,
+  requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  param('id').isMongoId().withMessage('Invalid File ID'),
+  validateChangeNominee(),
+  validateRequest,
+  fileController.changeNominee
 );
 
 router.delete(
