@@ -134,6 +134,10 @@ export const plotApi = createApi({
       query: (id) => ({
         url: `/plots/${id}/possession-ready`,
         method: "POST",
+        // Backend requires Content-Type: application/json on every POST
+        // (see swaggerRequestValidator) - a bodyless POST gets 415'd, so an
+        // explicit empty body is required even though the route ignores it.
+        body: {},
       }),
       transformResponse: (response: ApiResponse<Plot>) => response.data,
       invalidatesTags: ["Plot", "PlotStatistics"],
