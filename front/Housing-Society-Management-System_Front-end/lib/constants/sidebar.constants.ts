@@ -946,6 +946,7 @@ export const SIDEBAR_VISIBILITY: {
     vendors: false,
     workforce: false,
     "visitor-facility": false,
+    community: false,
   },
   items: {
     gamification: false,
