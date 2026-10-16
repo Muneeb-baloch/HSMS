@@ -61,6 +61,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { customToast } from "@/lib/utils/customToast"
 import { useConfirm } from "@/components/shared/ConfirmDialog";
 import { generateInstallmentInvoice } from "@/lib/utils/installmentPdf";
+import { ViewReceiptLink } from "@/components/shared/ViewReceiptLink";
 
 const STATUS_LABELS: Record<string, string> = {
   [InstallmentStatus.UNPAID]: 'Unpaid',
@@ -712,6 +713,13 @@ export default function InstallmentsPage () {
                                     >
                                       Invoice
                                     </Button>
+                                    {row.amountPaid > 0 && (
+                                      <ViewReceiptLink
+                                        targetType='installment'
+                                        targetId={row._id}
+                                        className='inline-flex items-center gap-1 text-sm text-primary hover:underline px-2'
+                                      />
+                                    )}
                                     {canUpdate && (
                                       <Button
                                         variant='outline'
