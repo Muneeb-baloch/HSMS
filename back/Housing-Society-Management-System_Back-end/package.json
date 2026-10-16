@@ -26,7 +26,8 @@
     "type-check": "tsc --noEmit",
     "sync-indexes": "tsx src/database/sync-indexes.ts",
     "test:watch": "NODE_ENV=test jest --watch",
-    "test:coverage": "NODE_ENV=test jest --coverage"
+    "test:coverage": "NODE_ENV=test jest --coverage",
+    "test:smoke": "bash scripts/run-smoke-tests.sh"
   },
   "keywords": [
     "node",

@@ -63,9 +63,11 @@ export const validateCreatePlot = [
     .isFloat({ min: 0 })
     .withMessage('Base Price cannot be negative'),
 
+  // plotTotalAmount is always recalculated server-side from plotBasePrice +
+  // surchargeAmount - discountAmount (see Plot model pre('validate')) - never
+  // required from the client, and never trusted even if sent.
   body('plotTotalAmount')
-    .notEmpty()
-    .withMessage('Total Amount is required')
+    .optional({ values: 'null' })
     .isFloat({ min: 0 })
     .withMessage('Total Amount cannot be negative'),
 
@@ -107,12 +109,19 @@ export const validateCreatePlot = [
     .isFloat({ min: -180, max: 180 })
     .withMessage('Longitude must be between -180 and 180'),
 
-  // Custom validator for price consistency
+  // Custom validator for price consistency - only meaningful when the client
+  // actually sent a plotTotalAmount; when it's omitted/null it will be
+  // server-computed as exactly basePrice + surcharge - discount, so there's
+  // nothing to reconcile against yet.
   body().custom((_value, { req }) => {
+    if (req.body.plotTotalAmount === undefined || req.body.plotTotalAmount === null) {
+      return true;
+    }
+
     const basePrice = req.body.plotBasePrice || 0;
     const surcharge = req.body.surchargeAmount || 0;
     const discount = req.body.discountAmount || 0;
-    const totalAmount = req.body.plotTotalAmount || 0;
+    const totalAmount = req.body.plotTotalAmount;
 
     if (totalAmount < basePrice + surcharge - discount) {
       throw new Error('Total amount is less than (base price + surcharge - discount)');

@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
+import { runInTransaction } from '../../common/services/areaAllocation.service';
 
 import Plot from '../../Plots/models/models-plot';
 import { InstallmentCategory } from '../index-installment-category';
@@ -282,29 +283,42 @@ export const installmentService = {
 
     // Use .create() for each installment to ensure pre('save') hooks run —
     // insertMany() skips pre('save') where balanceAmount/status are computed.
-    const createdInstallments: any[] = [];
+    // Wrapped in a transaction so a failure on any row (e.g. the unique
+    // installmentNo index on a later row) rolls back every row already
+    // created in this batch, instead of leaving a partial ledger.
+    const createdInstallments: any[] = await runInTransaction(async session => {
+      const results: any[] = [];
 
-    for (let i = 1; i <= data.totalInstallments; i++) {
-      const dueDate = calculateNextDueDate(data.startDate, data.frequency, i);
+      for (let i = 1; i <= data.totalInstallments; i++) {
+        const dueDate = calculateNextDueDate(data.startDate, data.frequency, i);
 
-      // Computed fields (totalPayable, balanceAmount, status) are ALWAYS recalculated by the model's pre('save') hook
-      const installment = await Installment.create({
-        fileId: data.fileId,
-        installmentCategoryId: data.installmentCategoryId,
-        installmentNo: i,
-        installmentTitle:
-          data.installmentTitle || `${installmentCategory.instCatName} - Installment ${i}`,
-        installmentType: data.installmentType,
-        dueDate,
-        amountDue: data.amountPerInstallment,
-        lateFeeSurcharge: 0,
-        amountPaid: 0,
-        isDeleted: false,
-        societyId: file.societyId,
-        createdBy: userId,
-      });
+        // Computed fields (totalPayable, balanceAmount, status) are ALWAYS recalculated by the model's pre('save') hook
+        const [installment] = await Installment.create(
+          [
+            {
+              fileId: data.fileId,
+              installmentCategoryId: data.installmentCategoryId,
+              installmentNo: i,
+              installmentTitle:
+                data.installmentTitle || `${installmentCategory.instCatName} - Installment ${i}`,
+              installmentType: data.installmentType,
+              dueDate,
+              amountDue: data.amountPerInstallment,
+              lateFeeSurcharge: 0,
+              amountPaid: 0,
+              isDeleted: false,
+              societyId: file.societyId,
+              createdBy: userId,
+            },
+          ],
+          { session }
+        );
 
-      createdInstallments.push(installment);
+        results.push(installment);
+      }
+
+      return results;
+    });
 
     // Fetch created installments with populated data
     const installmentIds = createdInstallments.map(inst => inst._id);
