@@ -182,7 +182,7 @@ export function ListingView({ id }: ListingViewProps) {
             {isOwner && !isSold && (
               <Button
                 variant="default"
-                onClick={() => {
+                onClick={async () => {
                   if (await confirm({ title: "Confirm", description: "Mark this listing as sold?" })) {
                     markAsSoldMutation.mutate(id);
                   }

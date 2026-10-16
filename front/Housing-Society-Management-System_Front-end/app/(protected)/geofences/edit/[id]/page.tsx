@@ -18,9 +18,9 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import GeofenceForm, {
-import { FormPageSkeleton } from '@/components/shared/PageSkeleton'
   type GeofenceFormData
 } from '@/components/attendance/GeofenceForm'
+import { FormPageSkeleton } from '@/components/shared/PageSkeleton'
 
 export default function EditGeofencePage () {
   const router = useRouter()

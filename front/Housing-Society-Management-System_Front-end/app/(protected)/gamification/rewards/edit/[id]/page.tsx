@@ -18,9 +18,9 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import RewardForm, {
-import { FormPageSkeleton } from '@/components/shared/PageSkeleton'
   type RewardFormData
 } from '@/components/gamification/RewardForm'
+import { FormPageSkeleton } from '@/components/shared/PageSkeleton'
 
 export default function EditRewardPage () {
   const router = useRouter()

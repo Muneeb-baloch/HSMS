@@ -311,7 +311,7 @@ export default function ViewPermissionPage () {
               {canDelete && (
                 <Button
                   variant='outline'
-                  onClick={() => {
+                  onClick={async () => {
                     if (
                       await confirm({ title: "Delete", description: 'Are you sure you want to delete this permission?', variant: "destructive" })
                     ) {

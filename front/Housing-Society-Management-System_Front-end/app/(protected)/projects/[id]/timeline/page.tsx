@@ -69,8 +69,8 @@ export default function ProjectTimelinePage () {
   const { data: timelineData, isLoading: timelineLoading } =
     useProjectTimeline(projectId)
 
-  const [events, setEvents] = useState<TimelineEvent[]>([
   const { confirm } = useConfirm();
+  const [events, setEvents] = useState<TimelineEvent[]>([
     {
       id: '1',
       title: 'Project Initiation',

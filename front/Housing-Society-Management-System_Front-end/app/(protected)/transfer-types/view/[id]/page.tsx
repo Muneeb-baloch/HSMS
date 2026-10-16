@@ -353,7 +353,7 @@ export default function ViewTransferTypePage () {
               <Button
                 variant='outline'
                 className='w-full justify-start'
-                onClick={() => {
+                onClick={async () => {
                   navigator.clipboard.writeText(transferType.typeName)
                   await alert({ description: 'Type name copied to clipboard!' })
                 }}

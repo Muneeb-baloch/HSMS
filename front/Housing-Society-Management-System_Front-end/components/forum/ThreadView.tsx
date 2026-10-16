@@ -179,7 +179,7 @@ export function ThreadView({ threadId }: ThreadViewProps) {
           variant="ghost"
           size="sm"
           className="h-7 px-2 text-xs text-muted-foreground"
-          onClick={() => {
+          onClick={async () => {
             if (
               await confirm({ title: "Flag", description: "Are you sure you want to flag this reply?" })
             ) {

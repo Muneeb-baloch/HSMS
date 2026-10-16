@@ -20,7 +20,6 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import {
-import { StatsPageSkeleton } from '@/components/shared/PageSkeleton'
   Bar,
   BarChart,
   Cell,
@@ -30,6 +29,7 @@ import { StatsPageSkeleton } from '@/components/shared/PageSkeleton'
   XAxis,
   YAxis
 } from 'recharts'
+import { StatsPageSkeleton } from '@/components/shared/PageSkeleton'
 type ChartColor =
   | {
       label?: React.ReactNode

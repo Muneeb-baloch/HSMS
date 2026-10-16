@@ -640,8 +640,45 @@ export default function SearchByLocationPage () {
               </CardHeader>
               <CardContent>
                 {isLoading ? (
-            <InlineSkeleton />
-          ) : (
+                  <InlineSkeleton />
+                ) : sortedProjects.length > 0 ? (
+                  <div>
+                    <div className='overflow-x-auto'>
+                      <table className='w-full'>
+                        <thead>
+                          <tr className='border-b text-left text-sm text-gray-500'>
+                            <th className='py-2 px-4'>Project</th>
+                            <th className='py-2 px-4'>Distance</th>
+                            <th className='py-2 px-4'>Status</th>
+                            <th className='py-2 px-4'>Plots</th>
+                            <th className='py-2 px-4'>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedProjects.map(project => {
+                            const distance =
+                              searchLocation && project.coordinates
+                                ? calculateDistance(
+                                    searchLocation.latitude,
+                                    searchLocation.longitude,
+                                    project.coordinates.latitude,
+                                    project.coordinates.longitude
+                                  )
+                                : null
+                            return (
+                              <tr key={project._id} className='border-b hover:bg-gray-50'>
+                                <td className='py-3 px-4'>
+                                  <div className='font-medium'>{project.projName}</div>
+                                  <div className='text-sm text-gray-500'>
+                                    {project.projCode}
+                                  </div>
+                                </td>
+                                <td className='py-3 px-4'>
+                                  {distance !== null ? (
+                                    <span className={getDistanceColor(distance)}>
+                                      {(distance / 1000).toFixed(2)} km
+                                    </span>
+                                  ) : (
                                     <span className='text-gray-400'>N/A</span>
                                   )}
                                 </td>

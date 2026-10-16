@@ -15,7 +15,6 @@ import { useBillDashboardSummary } from '@/lib/hooks/entities/useBillInfo'
 import { useMembers } from '@/lib/hooks/entities/useMember'
 import { useDefaulterStatistics } from '@/lib/hooks/entities/useDefaulter'
 import {
-import { InlineSkeleton } from '@/components/shared/PageSkeleton'
   BarChart3,
   Building,
   DollarSign,
@@ -24,6 +23,7 @@ import { InlineSkeleton } from '@/components/shared/PageSkeleton'
   TrendingUp,
   Users
 } from 'lucide-react'
+import { InlineSkeleton } from '@/components/shared/PageSkeleton'
 
 export default function AnalyticsPage () {
   const { user } = useAuth()
