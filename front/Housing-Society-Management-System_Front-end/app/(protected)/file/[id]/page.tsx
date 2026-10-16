@@ -10,7 +10,16 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table'
 import { useFile } from '@/lib/hooks/entities/useFile'
+import { usePaymentsByFile } from '@/lib/hooks/entities/usePayment'
 import { formatCurrency, formatDate } from '@/lib/utils/format'
 import { formatPlotType } from '@/lib/utils/plotUtils'
 import {
@@ -22,12 +31,19 @@ import {
   Edit,
   FileText,
   MapPin,
+  Receipt,
   Tag,
   User,
   UserCircle
 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { DetailPageSkeleton } from '@/components/shared/PageSkeleton'
+
+const TARGET_LABELS: Record<string, string> = {
+  installment: 'Installment',
+  bill: 'Bill'
+}
 
 export default function ViewFilePage () {
   const router = useRouter()
@@ -35,6 +51,7 @@ export default function ViewFilePage () {
 
   const id = params.id as string
   const { data: file, isLoading } = useFile(id)
+  const { data: payments, isLoading: paymentsLoading } = usePaymentsByFile(id)
   if (isLoading) {
     return <DetailPageSkeleton />
   }
@@ -305,6 +322,77 @@ export default function ViewFilePage () {
                       <div className='font-medium'>
                         {file.paymentPercentage}%
                       </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment History */}
+              <div className='space-y-2'>
+                <div className='flex items-center gap-2 text-gray-500'>
+                  <Receipt className='h-4 w-4' />
+                  <span className='text-sm font-medium'>Payment History</span>
+                </div>
+                <div className='pl-6'>
+                  {paymentsLoading ? (
+                    <div className='text-sm text-gray-500'>Loading payments...</div>
+                  ) : !payments || payments.length === 0 ? (
+                    <div className='text-sm text-gray-500'>No payments recorded yet.</div>
+                  ) : (
+                    <div className='border rounded-lg overflow-x-auto'>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Receipt No</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Paid Against</TableHead>
+                            <TableHead>Amount</TableHead>
+                            <TableHead>Mode</TableHead>
+                            <TableHead>Received By</TableHead>
+                            <TableHead className='text-right'>Receipt</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {payments.map(payment => {
+                            const receivedByName =
+                              typeof payment.receivedBy === 'object'
+                                ? payment.receivedBy.fullName ||
+                                  [payment.receivedBy.firstName, payment.receivedBy.lastName]
+                                    .filter(Boolean)
+                                    .join(' ')
+                                : '—'
+
+                            return (
+                              <TableRow key={payment._id}>
+                                <TableCell className='font-mono'>{payment.receiptNo}</TableCell>
+                                <TableCell>{formatDate(payment.paymentDate)}</TableCell>
+                                <TableCell>
+                                  {TARGET_LABELS[payment.targetType] || payment.targetType}
+                                  {payment.reversed && (
+                                    <Badge className='ml-2 bg-red-100 text-red-800'>
+                                      Reversed
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className='font-medium'>
+                                  {formatCurrency(payment.amount)}
+                                </TableCell>
+                                <TableCell>{payment.paymentMode}</TableCell>
+                                <TableCell>{receivedByName}</TableCell>
+                                <TableCell className='text-right'>
+                                  <Link
+                                    href={`/receipts/${payment._id}`}
+                                    className='inline-flex items-center gap-1 text-sm text-primary hover:underline'
+                                  >
+                                    <Receipt className='h-3.5 w-3.5' />
+                                    View
+                                  </Link>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
                     </div>
                   )}
                 </div>
