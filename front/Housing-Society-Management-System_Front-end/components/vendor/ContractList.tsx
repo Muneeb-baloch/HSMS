@@ -16,7 +16,7 @@ import {
 import { VendorContract } from "@/lib/types/vendor";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { customToast } from "@/lib/utils/customToast";
-import { formatDate } from "@/lib/utils/format";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 import {
   Plus,
   RefreshCw,
@@ -68,8 +68,7 @@ const contractColumns: TableColumn<VendorContract>[] = [
   {
     id: "amount",
     header: "Amount",
-    cell: (row) =>
-      row.amount ? `$${row.amount.toLocaleString()}` : "N/A",
+    cell: (row) => (row.amount ? formatCurrency(row.amount) : "N/A"),
   },
   {
     id: "startDate",

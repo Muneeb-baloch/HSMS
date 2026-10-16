@@ -11,7 +11,7 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import { useApplication } from '@/lib/hooks/entities/useApplication'
-import { formatDate } from '@/lib/utils/format'
+import { formatCurrency, formatDate } from '@/lib/utils/format'
 import {
   ArrowLeft,
   Calendar,
@@ -135,9 +135,9 @@ export default function ViewApplicationPage () {
                         application.applicationTypeID.applicationFee !==
                           undefined && (
                           <div className='text-sm text-gray-600'>
-                            Fee: $
-                            {application.applicationTypeID.applicationFee.toFixed(
-                              2
+                            Fee:{' '}
+                            {formatCurrency(
+                              application.applicationTypeID.applicationFee
                             )}
                           </div>
                         )}

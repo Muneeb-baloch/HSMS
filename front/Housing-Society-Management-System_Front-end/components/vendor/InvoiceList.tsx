@@ -17,7 +17,7 @@ import {
 import { VendorInvoice } from "@/lib/types/vendor";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { customToast } from "@/lib/utils/customToast";
-import { formatDate } from "@/lib/utils/format";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 import {
   Plus,
   RefreshCw,
@@ -74,12 +74,12 @@ const invoiceColumns: TableColumn<VendorInvoice>[] = [
   {
     id: "amount",
     header: "Amount",
-    cell: (row) => `$${row.amount?.toLocaleString() || "0"}`,
+    cell: (row) => formatCurrency(row.amount || 0),
   },
   {
     id: "taxAmount",
     header: "Tax",
-    cell: (row) => `$${row.taxAmount?.toLocaleString() || "0"}`,
+    cell: (row) => formatCurrency(row.taxAmount || 0),
   },
   {
     id: "totalAmount",

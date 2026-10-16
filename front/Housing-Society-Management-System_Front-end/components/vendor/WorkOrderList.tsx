@@ -15,7 +15,7 @@ import {
 import { WorkOrder } from "@/lib/types/vendor";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { customToast } from "@/lib/utils/customToast";
-import { formatDate } from "@/lib/utils/format";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 import {
   Plus,
   RefreshCw,
@@ -79,9 +79,7 @@ const workOrderColumns: TableColumn<WorkOrder>[] = [
     id: "estimatedBudget",
     header: "Budget",
     cell: (row) =>
-      row.estimatedBudget
-        ? `$${row.estimatedBudget.toLocaleString()}`
-        : "N/A",
+      row.estimatedBudget ? formatCurrency(row.estimatedBudget) : "N/A",
   },
   {
     id: "deadline",

@@ -89,6 +89,9 @@ export const applicationController = {
         endDate: req.query.endDate as string,
         sortBy: req.query.sortBy as string,
         sortOrder: req.query.sortOrder as 'asc' | 'desc',
+        applicationTypeCategory: req.query.applicationTypeCategory as string,
+        statusName: req.query.statusName as string,
+        excludeLinkedToTransfer: req.query.excludeLinkedToTransfer === 'true',
       };
 
       const result = await applicationService.getApplications(queryParams);

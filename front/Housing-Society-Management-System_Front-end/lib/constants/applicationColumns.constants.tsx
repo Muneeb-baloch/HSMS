@@ -2,7 +2,7 @@
 import { TableColumn } from '@/components/shared/DataTable/DataTable'
 import { Badge } from '@/components/ui/badge'
 import { Application } from '@/lib/types/application'
-import { formatDate } from '@/lib/utils/format'
+import { formatCurrency, formatDate } from '@/lib/utils/format'
 
 export const applicationColumns: TableColumn<Application>[] = [
   {
@@ -35,7 +35,7 @@ export const applicationColumns: TableColumn<Application>[] = [
           </div>
           {appType?.applicationFee !== undefined && (
             <div className='text-sm text-gray-500'>
-              Fee: ${appType.applicationFee.toFixed(2)}
+              Fee: {formatCurrency(appType.applicationFee)}
             </div>
           )}
         </div>

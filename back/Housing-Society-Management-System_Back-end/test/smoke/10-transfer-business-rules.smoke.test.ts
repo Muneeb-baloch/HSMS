@@ -736,3 +736,139 @@ describe('Transfer business rules', () => {
     expect(clearRes.data.data.nomineeId).toBeFalsy();
   });
 });
+
+describe('Transfer application picker filter (GET /application)', () => {
+  const tracker = makeTracker();
+
+  afterAll(async () => {
+    await tracker.cleanupAll();
+  });
+
+  test('only returns an approved, transfer-type application for the file member+plot that is not already linked to a live transfer', async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId, plotId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+
+    const transferAppTypeRes = await api.post('/applicationtype', {
+      applicationName: uniq('Smoke Transfer Application '),
+      applicationFee: 500,
+    });
+    expect(transferAppTypeRes.status).toBe(201);
+    const transferAppTypeId = transferAppTypeRes.data.data._id;
+    tracker.track('applicationtype', transferAppTypeId);
+
+    const otherAppTypeRes = await api.post('/applicationtype', {
+      applicationName: uniq('Smoke Duplicate File Application '),
+      applicationFee: 200,
+    });
+    expect(otherAppTypeRes.status).toBe(201);
+    const otherAppTypeId = otherAppTypeRes.data.data._id;
+    tracker.track('applicationtype', otherAppTypeId);
+
+    const approvedStatusRes = await api.post('/status', { statusName: 'Approved' });
+    expect(approvedStatusRes.status).toBe(201);
+    const approvedStatusId = approvedStatusRes.data.data._id;
+    tracker.track('status', approvedStatusId);
+
+    const pendingStatusRes = await api.post('/status', { statusName: 'Pending' });
+    expect(pendingStatusRes.status).toBe(201);
+    const pendingStatusId = pendingStatusRes.data.data._id;
+    tracker.track('status', pendingStatusId);
+
+    async function createApp(overrides: {
+      applicationTypeID: string;
+      memId: string;
+      statusId: string;
+    }) {
+      const res = await api.post('/application', {
+        applicationTypeID: overrides.applicationTypeID,
+        memId: overrides.memId,
+        plotId,
+        applicationDate: new Date().toISOString(),
+        statusId: overrides.statusId,
+      });
+      expect(res.status).toBe(201);
+      const id = res.data.data._id ?? res.data.data.id;
+      tracker.track('application', id);
+      return id as string;
+    }
+
+    // Matches every rule - should be returned.
+    const eligibleAppId = await createApp({
+      applicationTypeID: transferAppTypeId,
+      memId: fx.memberId,
+      statusId: approvedStatusId,
+    });
+
+    // Wrong application type (not a transfer-category application).
+    await createApp({
+      applicationTypeID: otherAppTypeId,
+      memId: fx.memberId,
+      statusId: approvedStatusId,
+    });
+
+    // Wrong status (not approved).
+    await createApp({
+      applicationTypeID: transferAppTypeId,
+      memId: fx.memberId,
+      statusId: pendingStatusId,
+    });
+
+    // Wrong member (belongs to memberId2, not the file's member).
+    await createApp({
+      applicationTypeID: transferAppTypeId,
+      memId: fx.memberId2,
+      statusId: approvedStatusId,
+    });
+
+    // Otherwise eligible, but already linked to a live (non-cancelled/
+    // rejected) transfer - must be excluded.
+    const linkedAppId = await createApp({
+      applicationTypeID: transferAppTypeId,
+      memId: fx.memberId,
+      statusId: approvedStatusId,
+    });
+    const transferType = await createTransferType(api, tracker, 1000);
+    const linkingTransferRes = await api.post('/transfer', {
+      fileId,
+      transferTypeId: transferType._id,
+      sellerMemId: fx.memberId,
+      buyerMemId: fx.memberId2,
+      transferInitDate: new Date().toISOString(),
+      applicationId: linkedAppId,
+    });
+    expect(linkingTransferRes.status).toBe(201);
+    tracker.track(
+      'transfer',
+      linkingTransferRes.data.data._id ?? linkingTransferRes.data.data.id
+    );
+
+    const res = await api.get('/application', {
+      params: {
+        memId: fx.memberId,
+        plotId,
+        applicationTypeCategory: 'transfer',
+        statusName: 'Approved',
+        excludeLinkedToTransfer: true,
+      },
+    });
+    expect(res.status).toBe(200);
+    const returnedIds = (res.data.data.applications as any[]).map(
+      (a: any) => a._id ?? a.id
+    );
+    expect(returnedIds).toContain(eligibleAppId);
+    expect(returnedIds).not.toContain(linkedAppId);
+    expect(returnedIds).toHaveLength(1);
+
+    // The label combines applicationNo, type name, member name, and plot no.
+    const eligibleApp = (res.data.data.applications as any[]).find(
+      (a: any) => (a._id ?? a.id) === eligibleAppId
+    );
+    expect(eligibleApp.applicationLabel).toContain(eligibleApp.applicationNo);
+    expect(eligibleApp.applicationLabel).toContain('·');
+  });
+});

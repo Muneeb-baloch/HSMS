@@ -161,6 +161,22 @@ applicationSchema.pre('validate', async function (next) {
   }
 });
 
+// Combined display label for pickers - "APP-no · Application type · Member
+// name · Plot no". Relies on applicationTypeID/memId/plotId already being
+// populated (every service method routes through basePopulate), so it
+// degrades to just the applicationNo when read unpopulated.
+applicationSchema.virtual('applicationLabel').get(function (this: any) {
+  const typeName =
+    this.applicationTypeID && typeof this.applicationTypeID === 'object'
+      ? this.applicationTypeID.applicationName
+      : undefined;
+  const memberName =
+    this.memId && typeof this.memId === 'object' ? this.memId.memName : undefined;
+  const plotNo = this.plotId && typeof this.plotId === 'object' ? this.plotId.plotNo : undefined;
+
+  return [this.applicationNo, typeName, memberName, plotNo].filter(Boolean).join(' · ');
+});
+
 // Ensure virtuals are included
 applicationSchema.set('toObject', { virtuals: true });
 applicationSchema.set('toJSON', { virtuals: true });

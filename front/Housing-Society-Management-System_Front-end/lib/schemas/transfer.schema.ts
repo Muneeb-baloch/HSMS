@@ -8,6 +8,9 @@ export const transferSchema = z.object({
   transferInitDate: z.string().min(1, "Transfer initiation date is required"),
 
   applicationId: z.string().optional(),
+  // Not sent to the backend - holds the selected file's plotId so the
+  // application picker's queryParams can scope to the file's plot.
+  filePlotId: z.string().optional(),
   ndcDocPath: z.string().max(500, "Must be a valid URL or path").optional(),
   transferFeeAmount: z
     .number()

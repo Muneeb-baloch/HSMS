@@ -72,6 +72,19 @@ export const validateGetApplications = (): ValidationChain[] => [
 
   query('endDate').optional().isISO8601().withMessage('Invalid end date format'),
 
+  query('applicationTypeCategory')
+    .optional()
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage('Application type category is too long'),
+
+  query('statusName').optional().trim().isLength({ max: 50 }).withMessage('Status name is too long'),
+
+  query('excludeLinkedToTransfer')
+    .optional()
+    .isBoolean()
+    .withMessage('excludeLinkedToTransfer must be a boolean'),
+
   query('sortBy')
     .optional()
     .isIn(['applicationNo', 'applicationDate', 'createdAt', 'updatedAt'])

@@ -55,21 +55,27 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
       value: unknown,
       form: ReturnType<typeof useForm<TransferFormData>>
     ) => {
-      // Buyer/nominee are scoped to the previous file's seller - reset both
-      // whenever the file changes so a stale pick can't carry over.
+      // Buyer/nominee/application are scoped to the previous file's
+      // seller/plot - reset all whenever the file changes so a stale pick
+      // can't carry over.
       form.setValue('buyerMemId', '')
       form.setValue('nomineeId', '')
+      form.setValue('applicationId', '')
 
       const fileId = typeof value === 'string' ? value : ''
       if (!fileId) {
         form.setValue('sellerMemId', '')
+        form.setValue('filePlotId', '')
         return
       }
       try {
         const fileResponse = await apiClient.get<File>(`/file/${fileId}`)
-        form.setValue('sellerMemId', String(fileResponse.data.data.memId || ''))
+        const file = fileResponse.data.data
+        form.setValue('sellerMemId', String(file.memId || ''))
+        form.setValue('filePlotId', String(file.plotId || ''))
       } catch {
         form.setValue('sellerMemId', '')
+        form.setValue('filePlotId', '')
       }
     }
   },
@@ -144,7 +150,9 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
     }
   },
 
-  // Application (optional)
+  // Application (optional) - scoped to a transfer-category application for
+  // this file's member+plot, approved, and not already claimed by another
+  // live transfer.
   {
     name: 'applicationId',
     label: 'Application',
@@ -152,9 +160,20 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
     required: false,
     relationship: {
       endpoint: '/application',
-      labelField: 'applicationNo',
+      labelField: 'applicationLabel',
       valueField: '_id',
-      searchable: true
+      searchable: true,
+      queryParams: (values: TransferFormData) => {
+        const params: Record<string, unknown> = {
+          applicationTypeCategory: 'transfer',
+          statusName: 'Approved',
+          excludeLinkedToTransfer: true
+        }
+        const memId = getMemberId(values.sellerMemId)
+        if (memId) params.memId = memId
+        if (values.filePlotId) params.plotId = values.filePlotId
+        return params
+      }
     }
   },
 
@@ -343,8 +362,9 @@ export default function CreateTransferPage () {
         }
       }
 
+      const { filePlotId: _filePlotId, ...submitData } = data
       const createData: CreateTransferDto = {
-        ...data,
+        ...submitData,
         transferFeeAmount: data.transferFeeAmount || undefined
       }
 

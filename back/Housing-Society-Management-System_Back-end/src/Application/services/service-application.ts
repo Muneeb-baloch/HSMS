@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import Member from '../../Member/models/models-member';
 import Plot from '../../Plots/models/models-plot';
 import Status from '../../Status/models/models-status';
+import SrTransfer, { TransferStatus } from '../../Transfer/models/models-transfer';
 import Application from '../models/models-application';
 import SrApplicationType from '../models/models-applicationtype';
 import {
@@ -81,6 +82,9 @@ export const applicationService = {
       statusId,
       startDate,
       endDate,
+      applicationTypeCategory,
+      statusName,
+      excludeLinkedToTransfer,
       sortBy = 'applicationDate',
       sortOrder = 'desc',
     } = params;
@@ -123,6 +127,37 @@ export const applicationService = {
       query.applicationDate = {};
       if (startDate) query.applicationDate.$gte = new Date(startDate);
       if (endDate) query.applicationDate.$lte = new Date(endDate);
+    }
+
+    // Restrict to application types whose name matches this category, e.g.
+    // the transfer form only wants "transfer"-category applications.
+    if (applicationTypeCategory) {
+      const matchingTypeIds = await SrApplicationType.find({
+        applicationName: { $regex: applicationTypeCategory, $options: 'i' },
+        isDeleted: false,
+      }).distinct('_id');
+      query.applicationTypeID = { $in: matchingTypeIds };
+    }
+
+    // Resolve a status by name (the generic Status collection has no
+    // dedicated "approved" flag, just a free-text statusName).
+    if (statusName) {
+      const matchingStatusIds = await Status.find({
+        statusName: { $regex: `^${statusName}$`, $options: 'i' },
+        isDeleted: false,
+      }).distinct('_id');
+      query.statusId = { $in: matchingStatusIds };
+    }
+
+    // Exclude applications already claimed by another transfer that's still
+    // live (a cancelled/rejected transfer frees its application back up).
+    if (excludeLinkedToTransfer) {
+      const linkedApplicationIds = await SrTransfer.find({
+        isDeleted: false,
+        applicationId: { $exists: true },
+        status: { $nin: [TransferStatus.REJECTED, TransferStatus.CANCELLED] },
+      }).distinct('applicationId');
+      query._id = { $nin: linkedApplicationIds };
     }
 
     const [applications, total] = await Promise.all([

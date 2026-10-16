@@ -120,7 +120,7 @@ export const fileFormFields: FieldConfig<FileFormData>[] = [
     required: false,
     relationship: {
       endpoint: "/application",
-      labelField: "applicationNo",
+      labelField: "applicationLabel",
       valueField: "_id",
       searchable: true,
       filter: (item: any) => !item.isDeleted,

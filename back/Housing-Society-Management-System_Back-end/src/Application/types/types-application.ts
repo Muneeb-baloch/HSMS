@@ -51,6 +51,12 @@ export interface ApplicationQueryParams {
   statusId?: string;
   startDate?: string;
   endDate?: string;
+  /** Match applicationType.applicationName against this substring (case-insensitive), e.g. 'transfer' */
+  applicationTypeCategory?: string;
+  /** Match status.statusName exactly (case-insensitive), e.g. 'Approved' */
+  statusName?: string;
+  /** Exclude applications already linked to a non-cancelled/rejected Transfer */
+  excludeLinkedToTransfer?: boolean;
 }
 
 export interface ApplicationSummary {
