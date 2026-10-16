@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/hooks/useAuth'
 import { updateInstallmentSchema } from '@/lib/schemas/installment.schema'
 import { UpdateInstallmentDto } from '@/lib/types/installment'
 import { ArrowLeft, Loader2 } from 'lucide-react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { customToast } from "@/lib/utils/customToast"
@@ -82,8 +83,6 @@ export default function EditInstallmentPage() {
     dueDate: new Date(installment.dueDate),
     amountDue: installment.amountDue,
     lateFeeSurcharge: installment.lateFeeSurcharge || 0,
-    amountPaid: installment.amountPaid,
-    paidDate: installment.paidDate ? new Date(installment.paidDate) : undefined,
     paymentMode: installment.paymentMode,
     transactionRefNo: installment.transactionRefNo || '',
     status: installment.status,
@@ -149,10 +148,20 @@ export default function EditInstallmentPage() {
           </span>
           <span className='text-sm font-medium'>Member:</span>
           <span className='text-sm bg-gray-100 px-2 py-1 rounded'>
-            {typeof installment.memId === 'object' ? installment.memId.memName
- : 'Member'}
+            {typeof installment.member === 'object' && installment.member
+              ? installment.member.memName
+              : '—'}
           </span>
         </div>
+      </div>
+
+      <div className='mb-4 rounded-md bg-blue-50 px-4 py-3 text-sm text-blue-800'>
+        To record a payment, change the amount paid, or correct the paid
+        date, use{' '}
+        <Link href={`/installments/${id}/payment`} className='font-medium underline'>
+          Record Payment
+        </Link>{' '}
+        instead - this form cannot change those fields.
       </div>
 
       <Card>

@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
 import { runInTransaction } from '../../common/services/areaAllocation.service';
+import { AppError } from '../../middleware/error.middleware';
 
 import Plot from '../../Plots/models/models-plot';
 import { InstallmentCategory } from '../index-installment-category';
@@ -225,8 +226,10 @@ export const installmentService = {
     }
 
     // Strip computed fields - totalPayable is ALWAYS recalculated by the model,
-    // client values (including null) are ignored and unsafe to trust.
-    const { totalPayable, balanceAmount, status, ...safeData } = data as any;
+    // client values (including null) are ignored and unsafe to trust. paidDate
+    // is a payment fact, not a creation-time input - a brand-new installment
+    // is never paid, so it must stay unset until recordPayment sets it.
+    const { totalPayable, balanceAmount, status, paidDate, ...safeData } = data as any;
 
     const installmentData: any = {
       ...safeData,
@@ -617,20 +620,33 @@ export const installmentService = {
       }
     }
 
-    // Strip computed fields - totalPayable, balanceAmount, status are ALWAYS recalculated by the model,
+    // Strip computed fields - totalPayable, balanceAmount are ALWAYS recalculated by the model,
     // client values (including null) are ignored and unsafe to trust.
-    const { totalPayable, balanceAmount, status, ...safeData } = data as any;
+    const { totalPayable, balanceAmount, ...safeData } = data as any;
+
+    // amountPaid and paidDate only ever change via recordPayment, which also
+    // derives status/balanceAmount from the new amountPaid atomically. A
+    // generic update can't do that safely, so reject rather than silently
+    // drop the field - the previous behavior (silent strip) let edits to
+    // these fields appear to succeed while doing nothing, with no feedback
+    // to the caller.
+    if ('amountPaid' in data) {
+      throw new AppError(400, 'amountPaid cannot be set via update - use Record Payment instead.');
+    }
+    if ('paidDate' in data) {
+      throw new AppError(400, 'paidDate cannot be set via update - use Record Payment instead.');
+    }
 
     const updateObj: any = {
       ...safeData,
       modifiedBy: userId,
     };
 
-    // Paid / Partially Paid / Unpaid are DERIVED from amountPaid vs amountDue —
-    // they can never be set directly through update (that's how a row could
-    // show "Paid" with amountPaid 0, or move money without a payment record).
-    // Only the administrative states (Cancelled / Refunded) may be set here;
-    // to collect money, callers must use recordPayment.
+    // Paid / Partially Paid / Unpaid / Overdue are DERIVED from amountPaid vs
+    // amountDue - they can never be set directly through update (that's how
+    // a row could show "Paid" with amountPaid 0, or move money without a
+    // payment record). Only the administrative states (Cancelled / Refunded)
+    // may be set here; to collect money, callers must use recordPayment.
     const paymentDerivedStatuses: string[] = [
       InstallmentStatus.PAID,
       InstallmentStatus.PARTIALLY_PAID,
@@ -638,13 +654,10 @@ export const installmentService = {
       InstallmentStatus.OVERDUE,
     ];
     if (data.status !== undefined && paymentDerivedStatuses.includes(data.status)) {
-      delete updateObj.status;
-    }
-
-    // amountPaid is not a free-form field either — it only changes via
-    // recordPayment. Ignore any attempt to set it through a generic update.
-    if ('amountPaid' in updateObj) {
-      delete updateObj.amountPaid;
+      throw new AppError(
+        400,
+        `status cannot be set to "${data.status}" via update - it is derived from amountPaid. Use Record Payment instead, or set status to Cancelled/Refunded.`
+      );
     }
 
     // Recalculate totals if amount due or late fee is edited, and re-derive the
@@ -1014,23 +1027,28 @@ export const installmentService = {
       recentPayments,
       upcomingDue,
     ] = await Promise.all([
+      // Outstanding must be computed live from totalPayable - amountPaid, not
+      // summed from the stored balanceAmount field. balanceAmount is only
+      // ever written by the pre('save') hook; any row created through a
+      // path that bypasses it (e.g. insertMany, which only runs pre('validate'))
+      // is left at its schema default of 0 while still carrying a real
+      // amountDue/totalPayable - silently dropping it out of this total.
+      // Matching ledger facts (status $nin Cancelled/Refunded + amountPaid <
+      // totalPayable) instead of trusting the stored status string also
+      // avoids the same staleness the Overdue list filter already moved
+      // away from (see list filter note elsewhere in this file).
       Installment.aggregate([
         {
           $match: {
             isDeleted: false,
-            status: {
-              $in: [
-                InstallmentStatus.UNPAID,
-                InstallmentStatus.PARTIALLY_PAID,
-                InstallmentStatus.OVERDUE,
-              ],
-            },
+            status: { $nin: [InstallmentStatus.CANCELLED, InstallmentStatus.REFUNDED] },
+            $expr: { $lt: ['$amountPaid', '$totalPayable'] },
           },
         },
         {
           $group: {
             _id: null,
-            totalOutstanding: { $sum: '$balanceAmount' },
+            totalOutstanding: { $sum: { $subtract: ['$totalPayable', '$amountPaid'] } },
           },
         },
       ]),
@@ -1064,18 +1082,21 @@ export const installmentService = {
           },
         },
       ]),
+      // Same fix as totalOutstanding above: compute live, don't trust the
+      // stored balanceAmount field.
       Installment.aggregate([
         {
           $match: {
             isDeleted: false,
             dueDate: { $lt: today },
-            status: { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] },
+            status: { $nin: [InstallmentStatus.CANCELLED, InstallmentStatus.REFUNDED] },
+            $expr: { $lt: ['$amountPaid', '$totalPayable'] },
           },
         },
         {
           $group: {
             _id: null,
-            totalOverdue: { $sum: '$balanceAmount' },
+            totalOverdue: { $sum: { $subtract: ['$totalPayable', '$amountPaid'] } },
           },
         },
       ]),

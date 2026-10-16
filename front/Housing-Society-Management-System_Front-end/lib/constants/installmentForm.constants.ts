@@ -388,22 +388,6 @@ export const updateInstallmentFormFields: FieldConfig<any>[] = [
     step: 0.01,
   },
   {
-    name: "amountPaid",
-    label: "Amount Paid",
-    type: "number",
-    required: false,
-    placeholder: "Enter amount paid",
-    min: 0,
-    step: 0.01,
-  },
-  {
-    name: "paidDate",
-    label: "Paid Date",
-    type: "date",
-    required: false,
-    max: new Date(),
-  },
-  {
     name: "paymentMode",
     label: "Payment Mode",
     type: "select",
@@ -427,14 +411,13 @@ export const updateInstallmentFormFields: FieldConfig<any>[] = [
   },
   {
     name: "status",
-    label: "Status",
+    label: "Status (administrative only - use Record Payment to collect money)",
     type: "select",
     required: false,
+    // Unpaid/Partially Paid/Paid/Overdue are derived from amountPaid and are
+    // rejected by the backend if set here - only the two administrative
+    // states can be set through this form.
     options: [
-      { label: "Unpaid", value: "Unpaid" },
-      { label: "Partially Paid", value: "Partially Paid" },
-      { label: "Paid", value: "Paid" },
-      { label: "Overdue", value: "Overdue" },
       { label: "Cancelled", value: "Cancelled" },
       { label: "Refunded", value: "Refunded" },
     ],

@@ -1,29 +1,27 @@
 import axios, { AxiosInstance } from 'axios';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 export const API_URL = process.env.SMOKE_API_URL || 'http://localhost:5002/api';
 
+const TOKEN_FILE = path.join(os.tmpdir(), 'hsms-smoke-token.json');
+
 let cachedClient: AxiosInstance | null = null;
-let cachedToken: string | null = null;
 
 export async function getClient(): Promise<AxiosInstance> {
-  if (cachedClient && cachedToken) return cachedClient;
+  if (cachedClient) return cachedClient;
 
-  const bare = axios.create({ baseURL: API_URL, validateStatus: () => true });
-  const loginRes = await bare.post('/auth/login', {
-    email: 'admin@societysphere.com',
-    password: 'Admin@1234',
-  });
+  // Jest isolates modules per test file, so this module-scoped cache only
+  // dedupes calls within one file. The actual login happens exactly once
+  // for the whole suite, in globalSetup.ts - read its token here instead of
+  // calling /auth/login again (six files x their own login trips the auth
+  // rate limiter).
+  const { accessToken } = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf-8'));
 
-  if (loginRes.status !== 200 || !loginRes.data?.data?.tokens?.accessToken) {
-    throw new Error(
-      `Smoke test login failed: ${loginRes.status} ${JSON.stringify(loginRes.data)}`
-    );
-  }
-
-  cachedToken = loginRes.data.data.tokens.accessToken;
   cachedClient = axios.create({
     baseURL: API_URL,
-    headers: { Authorization: `Bearer ${cachedToken}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
     validateStatus: () => true,
   });
 

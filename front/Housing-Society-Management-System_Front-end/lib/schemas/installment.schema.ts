@@ -72,17 +72,16 @@ export const updateInstallmentSchema = z.object({
     .number()
     .min(0, "Late fee surcharge cannot be negative")
     .optional(),
-  amountPaid: z.coerce
-    .number()
-    .min(0, "Amount paid must be positive")
-    .optional(),
-  paidDate: z.coerce.date().optional(),
   paymentMode: z.nativeEnum(PaymentMode).optional(),
   transactionRefNo: z
     .string()
     .max(100, "Transaction reference cannot exceed 100 characters")
     .optional(),
-  status: z.nativeEnum(InstallmentStatus).optional(),
+  // amountPaid/paidDate only ever change via Record Payment (paymentSchema
+  // below); Unpaid/Partially Paid/Paid/Overdue are derived from amountPaid
+  // and rejected by the backend if sent through this form - only the two
+  // administrative states are valid here.
+  status: z.enum(["Cancelled", "Refunded"]).optional(),
   installmentRemarks: z
     .string()
     .max(1000, "Remarks cannot exceed 1000 characters")
