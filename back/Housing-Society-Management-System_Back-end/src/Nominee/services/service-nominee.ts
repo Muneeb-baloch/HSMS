@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
+import { AppError } from '../../middleware/error.middleware';
 import Nominee from '../models/models-nominee';
 import {
   CreateNomineeDto,
@@ -34,7 +35,7 @@ export const nomineeService = {
     // Check if member exists
     const member = await Member.findById(data.memId);
     if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
+      throw new AppError(404, 'Member not found');
     }
 
     // Check if CNIC already exists
@@ -44,7 +45,7 @@ export const nomineeService = {
     });
 
     if (existingNominee) {
-      throw new Error('Nominee with this CNIC already exists');
+      throw new AppError(409, 'Nominee with this CNIC already exists');
     }
 
     // Validate total share percentage for member
@@ -61,7 +62,7 @@ export const nomineeService = {
     const newTotalShare = totalShare + (data.nomineeSharePercentage || 100);
 
     if (newTotalShare > 100) {
-      throw new Error(`Total share percentage exceeds 100%. Current total: ${newTotalShare}%`);
+      throw new AppError(400, `Total share percentage exceeds 100%. Current total: ${newTotalShare}%`);
     }
 
     const nomineeData = {
@@ -96,15 +97,15 @@ export const nomineeService = {
         .populate('modifiedBy', 'userName fullName designation');
 
       if (!nominee || nominee.isDeleted) {
-        throw new Error('Nominee not found');
+        throw new AppError(404, 'Nominee not found');
       }
 
       return toPlainObject(nominee);
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof AppError) {
         throw error;
       }
-      throw new Error('Invalid nominee ID');
+      throw new AppError(400, 'Invalid nominee ID');
     }
   },
 
@@ -201,7 +202,7 @@ export const nomineeService = {
   ): Promise<NomineeType | null> {
     const existingNominee = await Nominee.findById(id);
     if (!existingNominee || existingNominee.isDeleted) {
-      throw new Error('Nominee not found');
+      throw new AppError(404, 'Nominee not found');
     }
 
     // Check if CNIC is being changed to an existing one
@@ -213,7 +214,7 @@ export const nomineeService = {
       });
 
       if (duplicate) {
-        throw new Error('Nominee with this CNIC already exists');
+        throw new AppError(409, 'Nominee with this CNIC already exists');
       }
     }
 
@@ -233,7 +234,7 @@ export const nomineeService = {
       const newTotalShare = totalShare + data.nomineeSharePercentage;
 
       if (newTotalShare > 100) {
-        throw new Error(`Total share percentage exceeds 100%. New total: ${newTotalShare}%`);
+        throw new AppError(400, `Total share percentage exceeds 100%. New total: ${newTotalShare}%`);
       }
     }
 
@@ -259,7 +260,7 @@ export const nomineeService = {
   async deleteNominee(id: string, userId: Types.ObjectId): Promise<boolean> {
     const existingNominee = await Nominee.findById(id);
     if (!existingNominee || existingNominee.isDeleted) {
-      throw new Error('Nominee not found');
+      throw new AppError(404, 'Nominee not found');
     }
 
     // Check if nominee is referenced in any active files
@@ -272,7 +273,7 @@ export const nomineeService = {
     });
 
     if (fileWithNominee) {
-      throw new Error('Cannot delete nominee that is referenced in active files');
+      throw new AppError(400, 'Cannot delete nominee that is referenced in active files');
     }
 
     const result = await Nominee.findByIdAndUpdate(
@@ -544,7 +545,7 @@ export const nomineeService = {
       try {
         return new Types.ObjectId(id);
       } catch (error) {
-        throw new Error(`Invalid nominee ID: ${id}`);
+        throw new AppError(400, `Invalid nominee ID: ${id}`);
       }
     });
 

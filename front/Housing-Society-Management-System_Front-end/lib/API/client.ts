@@ -134,6 +134,8 @@ client.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+const FRIENDLY_FALLBACK_MESSAGE = "Something went wrong. Please try again.";
+
 client.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -143,11 +145,27 @@ client.interceptors.response.use(
     // `err.response.data.message`. Backfill it here once, so every existing
     // and future `.data.message` read gets the real reason instead of
     // silently falling back to a generic string.
+    let serverMessage: string | undefined;
     if (error.response?.data && typeof error.response.data === "object") {
       const data = error.response.data as { message?: string; error?: string };
       if (!data.message && data.error) {
         data.message = data.error;
       }
+      serverMessage = data.message;
+    }
+
+    // Many call sites across this app still toast `error.message` directly
+    // (axios's own message, e.g. "Request failed with status code 500")
+    // instead of digging into `.response.data`. Overwrite it here once, so
+    // every one of those call sites shows the real business-rule reason on
+    // a 4xx, and a friendly fallback - never a raw status code - on a 5xx
+    // or a response with no usable message (including network errors,
+    // where `error.response` is undefined entirely).
+    const status = error.response?.status;
+    if (!status || status >= 500 || !serverMessage) {
+      error.message = FRIENDLY_FALLBACK_MESSAGE;
+    } else {
+      error.message = serverMessage;
     }
 
     const originalRequest = error.config as InternalAxiosRequestConfig & {

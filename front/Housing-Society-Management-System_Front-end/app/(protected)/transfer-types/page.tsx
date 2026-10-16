@@ -3,13 +3,11 @@
 
 import { ActionBar } from '@/components/shared/PageTemplate'
 import { EnhancedDataTable as DataTable } from '@/components/shared/DataTable/DataTable'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { hasPermission, UserRole } from '@/lib/constants/roles'
 import { transferTypeColumns } from '@/lib/constants/transferTypeColumns.constants'
 import {
-  useCommonTransferTypes,
   useDeleteTransferType,
   useTransferTypes,
   useTransferTypeStatistics,
@@ -46,7 +44,6 @@ export default function TransferTypesPage () {
   const { data, isLoading, refetch } = useTransferTypes(filters)
   const { data: summary } = useTransferTypeSummary()
   const { data: statistics } = useTransferTypeStatistics()
-  const { data: commonTypes } = useCommonTransferTypes()
 
   const deleteMutation = useDeleteTransferType()
 
@@ -329,51 +326,6 @@ export default function TransferTypesPage () {
           </CardContent>
         </Card>
       </div>
-
-      {/* Common Transfer Types */}
-      {commonTypes && commonTypes.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Common Transfer Types</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-              {commonTypes.slice(0, 6).map((type, index) => (
-                <Card key={index} className='border'>
-                  <CardContent className='pt-4'>
-                    <div className='flex justify-between items-start mb-2'>
-                      <h3 className='font-semibold'>{type.name}</h3>
-                      <Badge variant='outline' className='bg-blue-50'>
-                        Rs. {type.typicalFee.toLocaleString()}
-                      </Badge>
-                    </div>
-                    <p className='text-sm text-gray-600 mb-3'>
-                      {type.description}
-                    </p>
-                    <div className='text-xs text-gray-500'>
-                      <div className='font-medium mb-1'>
-                        Required Documents:
-                      </div>
-                      <ul className='space-y-1'>
-                        {type.requiresDocuments.slice(0, 3).map((doc, i) => (
-                          <li key={i} className='truncate'>
-                            • {doc}
-                          </li>
-                        ))}
-                        {type.requiresDocuments.length > 3 && (
-                          <li className='text-blue-600'>
-                            +{type.requiresDocuments.length - 3} more
-                          </li>
-                        )}
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Actions Bar */}
       <ActionBar

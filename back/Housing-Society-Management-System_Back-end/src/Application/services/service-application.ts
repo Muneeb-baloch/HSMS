@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import Member from '../../Member/models/models-member';
+import { AppError } from '../../middleware/error.middleware';
 import Plot from '../../Plots/models/models-plot';
 import Status from '../../Status/models/models-status';
 import SrTransfer, { TransferStatus } from '../../Transfer/models/models-transfer';
@@ -29,23 +30,23 @@ export const applicationService = {
       (applicationType as any).isDeleted ||
       (applicationType as any).isActive === false
     ) {
-      throw new Error('Invalid or inactive application type');
+      throw new AppError(400, 'Invalid or inactive application type');
     }
 
     const member = await Member.findById(data.memId);
     if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
+      throw new AppError(404, 'Member not found');
     }
 
     const status = await Status.findById(data.statusId);
     if (!status || (status as any).isDeleted) {
-      throw new Error('Status not found');
+      throw new AppError(404, 'Status not found');
     }
 
     if (data.plotId) {
       const plot = await Plot.findById(data.plotId);
       if (!plot || (plot as any).isDeleted) {
-        throw new Error('Plot not found');
+        throw new AppError(404, 'Plot not found');
       }
     }
 
@@ -192,7 +193,7 @@ export const applicationService = {
         (applicationType as any).isDeleted ||
         (applicationType as any).isActive === false
       ) {
-        throw new Error('Invalid or inactive application type');
+        throw new AppError(400, 'Invalid or inactive application type');
       }
       updateData.applicationTypeID = new Types.ObjectId(data.applicationTypeID);
     }
@@ -200,7 +201,7 @@ export const applicationService = {
     if (data.memId) {
       const member = await Member.findById(data.memId);
       if (!member || (member as any).isDeleted) {
-        throw new Error('Member not found');
+        throw new AppError(404, 'Member not found');
       }
       updateData.memId = new Types.ObjectId(data.memId);
     }
@@ -208,7 +209,7 @@ export const applicationService = {
     if (data.plotId) {
       const plot = await Plot.findById(data.plotId);
       if (!plot || (plot as any).isDeleted) {
-        throw new Error('Plot not found');
+        throw new AppError(404, 'Plot not found');
       }
       updateData.plotId = new Types.ObjectId(data.plotId);
     }
@@ -216,7 +217,7 @@ export const applicationService = {
     if (data.statusId) {
       const status = await Status.findById(data.statusId);
       if (!status || (status as any).isDeleted) {
-        throw new Error('Status not found');
+        throw new AppError(404, 'Status not found');
       }
       updateData.statusId = new Types.ObjectId(data.statusId);
     }

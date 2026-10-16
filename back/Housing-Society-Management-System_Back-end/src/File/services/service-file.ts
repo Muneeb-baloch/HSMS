@@ -191,50 +191,50 @@ export const fileService = {
         isDeleted: false,
       });
       if (existingFile) {
-        throw new Error('File registration number already exists');
+        throw new AppError(409, 'File registration number already exists');
       }
     }
 
     // Plan is REQUIRED
     if (!data.planId) {
-      throw new Error('Installment plan is required');
+      throw new AppError(400, 'Installment plan is required');
     }
 
     // Plot is REQUIRED
     if (!data.plotId) {
-      throw new Error('Plot ID is required - file must be associated with a plot');
+      throw new AppError(400, 'Plot ID is required - file must be associated with a plot');
     }
 
     // Check if plan exists and is active
     const plan = await InstallmentPlan.findById(data.planId);
     if (!plan || (plan as any).isDeleted || !(plan as any).isActive) {
-      throw new Error('Installment plan not found or inactive');
+      throw new AppError(400, 'Installment plan not found or inactive');
     }
 
     // Check if plot exists
     const plot = await Plot.findById(data.plotId);
     if (!plot || (plot as any).isDeleted) {
-      throw new Error('Plot not found');
+      throw new AppError(404, 'Plot not found');
     }
 
     // Validate plan belongs to plot's project
     const plotProjId = (plot.projectId as Types.ObjectId).toString();
     const planProjId = (plan.projId as Types.ObjectId).toString();
     if (plotProjId !== planProjId) {
-      throw new Error('Installment plan must belong to the same project as the selected plot');
+      throw new AppError(400, 'Installment plan must belong to the same project as the selected plot');
     }
 
     // Check if member exists
     const member = await Member.findById(data.memId);
     if (!member || (member as any).isDeleted) {
-      throw new Error('Member not found');
+      throw new AppError(404, 'Member not found');
     }
 
     // Check if nominee exists (if provided)
     if (data.nomineeId) {
       const nominee = await Nominee.findById(data.nomineeId);
       if (!nominee || (nominee as any).isDeleted) {
-        throw new Error('Nominee not found');
+        throw new AppError(404, 'Nominee not found');
       }
     }
 
@@ -242,7 +242,7 @@ export const fileService = {
     if (data.applicationId) {
       const application = await Application.findById(data.applicationId);
       if (!application || (application as any).isDeleted) {
-        throw new Error('Application not found');
+        throw new AppError(404, 'Application not found');
       }
     }
 
@@ -429,16 +429,16 @@ export const fileService = {
         .populate('modifiedBy', 'firstName lastName email designation');
 
       if (!file || file.isDeleted) {
-        throw new Error('File not found');
+        throw new AppError(404, 'File not found');
       }
 
       const [withFinancials] = await attachFinancials([toPlainObject(file)]);
       return withFinancials;
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof AppError) {
         throw error;
       }
-      throw new Error('Invalid file ID');
+      throw new AppError(400, 'Invalid file ID');
     }
   },
 
@@ -653,7 +653,7 @@ export const fileService = {
   ): Promise<FileType | null> {
     const existingFile = await File.findById(id);
     if (!existingFile || existingFile.isDeleted) {
-      throw new Error('File not found');
+      throw new AppError(404, 'File not found');
     }
 
     // Check if planId is being changed
@@ -661,7 +661,7 @@ export const fileService = {
     if (newPlanId && newPlanId !== existingFile.planId?.toString()) {
       const plan = await InstallmentPlan.findById(newPlanId);
       if (!plan || (plan as any).isDeleted || !(plan as any).isActive) {
-        throw new Error('Installment plan not found or inactive');
+        throw new AppError(400, 'Installment plan not found or inactive');
       }
       const plotForProject = await Plot.findById(
         data.plotId || existingFile.plotId
@@ -670,7 +670,8 @@ export const fileService = {
         const plotProjId = (plotForProject.projectId as Types.ObjectId).toString();
         const planProjId = (plan.projId as Types.ObjectId).toString();
         if (plotProjId !== planProjId) {
-          throw new Error(
+          throw new AppError(
+            400,
             'Installment plan must belong to the same project as the file plot'
           );
         }
@@ -681,7 +682,7 @@ export const fileService = {
     if (data.plotId && data.plotId !== existingFile.plotId?.toString()) {
       const plot = await Plot.findById(data.plotId);
       if (!plot || (plot as any).isDeleted) {
-        throw new Error('Plot not found');
+        throw new AppError(404, 'Plot not found');
       }
 
       // If planId is also being updated, validate; otherwise ensure existing plan matches new plot's project
@@ -692,7 +693,8 @@ export const fileService = {
         const plotProjId = (plot.projectId as Types.ObjectId).toString();
         const planProjId = (planToCheck.projId as Types.ObjectId).toString();
         if (plotProjId !== planProjId) {
-          throw new Error(
+          throw new AppError(
+            400,
             'Installment plan must belong to the same project as the selected plot'
           );
         }
@@ -715,7 +717,7 @@ export const fileService = {
     if (data.nomineeId) {
       const nominee = await Nominee.findById(data.nomineeId);
       if (!nominee || (nominee as any).isDeleted) {
-        throw new Error('Nominee not found');
+        throw new AppError(404, 'Nominee not found');
       }
     }
 
@@ -807,12 +809,12 @@ export const fileService = {
   async deleteFile(id: string, userId: Types.ObjectId): Promise<boolean> {
     const existingFile = await File.findById(id);
     if (!existingFile || existingFile.isDeleted) {
-      throw new Error('File not found');
+      throw new AppError(404, 'File not found');
     }
 
     // Don't allow deletion of active files
     if (existingFile.status === FileStatus.ACTIVE) {
-      throw new Error('Cannot delete an active file');
+      throw new AppError(400, 'Cannot delete an active file');
     }
 
     const result = await File.findByIdAndUpdate(
@@ -993,17 +995,17 @@ export const fileService = {
   ): Promise<FileType | null> {
     const file = await File.findById(id);
     if (!file || file.isDeleted) {
-      throw new Error('File not found');
+      throw new AppError(404, 'File not found');
     }
 
     if (file.status !== FileStatus.ACTIVE) {
-      throw new Error('Only active files can be transferred');
+      throw new AppError(400, 'Only active files can be transferred');
     }
 
     // Check if new member exists
     const newMember = await Member.findById(data.newMemberId);
     if (!newMember || (newMember as any).isDeleted) {
-      throw new Error('New member not found');
+      throw new AppError(404, 'New member not found');
     }
 
     const updateObj: any = {
@@ -1041,11 +1043,11 @@ export const fileService = {
   ): Promise<FileType | null> {
     const file = await File.findById(id);
     if (!file || file.isDeleted) {
-      throw new Error('File not found');
+      throw new AppError(404, 'File not found');
     }
 
     if (file.status === FileStatus.CANCELLED || file.status === FileStatus.CLOSED) {
-      throw new Error('Cannot adjust a cancelled or closed file');
+      throw new AppError(400, 'Cannot adjust a cancelled or closed file');
     }
 
     const updateObj: any = {
@@ -1491,16 +1493,16 @@ export const fileService = {
   ): Promise<FileType | null> {
     const file = await File.findById(fileId);
     if (!file || file.isDeleted) {
-      throw new Error('File not found');
+      throw new AppError(404, 'File not found');
     }
 
     if (file.status !== FileStatus.ACTIVE && file.status !== FileStatus.PENDING) {
-      throw new Error('Only active or pending files can be assigned plots');
+      throw new AppError(400, 'Only active or pending files can be assigned plots');
     }
 
     const plot = await Plot.findById(plotId);
     if (!plot || (plot as any).isDeleted) {
-      throw new Error('Plot not found');
+      throw new AppError(404, 'Plot not found');
     }
 
     // Check if plot is already allocated
@@ -1563,7 +1565,7 @@ export const fileService = {
       try {
         return new Types.ObjectId(id);
       } catch (error) {
-        throw new Error(`Invalid file ID: ${id}`);
+        throw new AppError(400, `Invalid file ID: ${id}`);
       }
     });
 

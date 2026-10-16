@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { AppError } from '../../middleware/error.middleware';
 import { SrTransfer } from '../index-transfer';
 import SrTransferType from '../models/models-transfer-type';
 import {
@@ -46,12 +47,12 @@ export const srTransferTypeService = {
     });
 
     if (existingType) {
-      throw new Error('Transfer type name already exists');
+      throw new AppError(409, 'Transfer type name already exists');
     }
 
     // Validate transfer fee
     if (data.transferFee < 0) {
-      throw new Error('Transfer fee cannot be negative');
+      throw new AppError(400, 'Transfer fee cannot be negative');
     }
 
     const transferTypeData = {
@@ -87,15 +88,15 @@ export const srTransferTypeService = {
         .populate({ path: 'transferCount', match: { isDeleted: false } });
 
       if (!transferType || transferType.isDeleted) {
-        throw new Error('Transfer type not found');
+        throw new AppError(404, 'Transfer type not found');
       }
 
       return toPlainObject(transferType);
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof AppError) {
         throw error;
       }
-      throw new Error('Invalid transfer type ID');
+      throw new AppError(400, 'Invalid transfer type ID');
     }
   },
 
@@ -190,7 +191,7 @@ export const srTransferTypeService = {
   ): Promise<SrTransferTypeType | null> {
     const existingType = await SrTransferType.findById(id);
     if (!existingType || existingType.isDeleted) {
-      throw new Error('Transfer type not found');
+      throw new AppError(404, 'Transfer type not found');
     }
 
     // Check if type name is being changed to an existing one
@@ -207,7 +208,7 @@ export const srTransferTypeService = {
       });
 
       if (duplicate) {
-        throw new Error('Transfer type name already exists');
+        throw new AppError(409, 'Transfer type name already exists');
       }
 
       data.typeName = formattedName;
@@ -221,7 +222,7 @@ export const srTransferTypeService = {
       });
 
       if (transferCount > 0) {
-        throw new Error('Cannot deactivate transfer type that has associated transfers');
+        throw new AppError(400, 'Cannot deactivate transfer type that has associated transfers');
       }
     }
 
@@ -245,7 +246,7 @@ export const srTransferTypeService = {
   async deleteTransferType(id: string, userId: Types.ObjectId): Promise<boolean> {
     const existingType = await SrTransferType.findById(id);
     if (!existingType || existingType.isDeleted) {
-      throw new Error('Transfer type not found');
+      throw new AppError(404, 'Transfer type not found');
     }
 
     // Check if transfer type has associated transfers
@@ -256,7 +257,7 @@ export const srTransferTypeService = {
     });
 
     if (transferCount > 0) {
-      throw new Error('Cannot delete transfer type that has associated transfers');
+      throw new AppError(400, 'Cannot delete transfer type that has associated transfers');
     }
 
     const result = await SrTransferType.findByIdAndUpdate(
@@ -300,7 +301,7 @@ export const srTransferTypeService = {
   }> {
     const transferType = await SrTransferType.findById(params.transferTypeId);
     if (!transferType || transferType.isDeleted || !transferType.isActive) {
-      throw new Error('Transfer type not found or inactive');
+      throw new AppError(400, 'Transfer type not found or inactive');
     }
 
     let baseFee = transferType.transferFee;
@@ -536,7 +537,7 @@ export const srTransferTypeService = {
       try {
         return new Types.ObjectId(id);
       } catch (error) {
-        throw new Error(`Invalid transfer type ID: ${id}`);
+        throw new AppError(400, `Invalid transfer type ID: ${id}`);
       }
     });
 
@@ -548,7 +549,7 @@ export const srTransferTypeService = {
       });
 
       if (typesWithTransfers > 0) {
-        throw new Error('Cannot deactivate transfer types that have associated transfers');
+        throw new AppError(400, 'Cannot deactivate transfer types that have associated transfers');
       }
     }
 
@@ -581,7 +582,7 @@ export const srTransferTypeService = {
   }> {
     const transferType = await SrTransferType.findById(transferTypeId);
     if (!transferType || transferType.isDeleted) {
-      throw new Error('Transfer type not found');
+      throw new AppError(404, 'Transfer type not found');
     }
 
     const issues: string[] = [];
@@ -653,7 +654,7 @@ export const srTransferTypeService = {
     userId: Types.ObjectId
   ): Promise<{ updated: number; averageFee: number }> {
     if (percentage < -100 || percentage > 100) {
-      throw new Error('Percentage must be between -100 and 100');
+      throw new AppError(400, 'Percentage must be between -100 and 100');
     }
 
     const multiplier = 1 + percentage / 100;

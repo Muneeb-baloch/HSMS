@@ -357,7 +357,8 @@ export const possessionService = {
           !allowedTransitions.includes(data.possessionStatus) &&
           data.possessionStatus !== possession.possessionStatus
         ) {
-          throw new Error(
+          throw new AppError(
+            400,
             `Cannot transition from ${possession.possessionStatus} to ${data.possessionStatus}`
           );
         }
@@ -420,7 +421,7 @@ export const possessionService = {
     const possession = await Possession.findById(data.possessionId);
 
     if (!possession) {
-      throw new Error('Possession not found');
+      throw new AppError(404, 'Possession not found');
     }
 
     // Validate status transition
@@ -870,7 +871,7 @@ export const possessionService = {
     const possession = await Possession.findById(possessionId);
 
     if (!possession) {
-      throw new Error('Possession not found');
+      throw new AppError(404, 'Possession not found');
     }
 
     const timeline = [
@@ -996,11 +997,11 @@ export const possessionService = {
     const possession = await Possession.findById(data.possessionId);
 
     if (!possession) {
-      throw new Error('Possession not found');
+      throw new AppError(404, 'Possession not found');
     }
 
     if (possession.possessionStatus !== PossessionStatus.HANDED_OVER) {
-      throw new Error('Cannot generate certificate for non-handed over possession');
+      throw new AppError(400, 'Cannot generate certificate for non-handed over possession');
     }
 
     // Update possession with certificate details

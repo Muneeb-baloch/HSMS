@@ -184,15 +184,15 @@ export const srTransferService = {
         .populate('modifiedBy', 'userName fullName designation');
 
       if (!transfer || transfer.isDeleted) {
-        throw new Error('Transfer not found');
+        throw new AppError(404, 'Transfer not found');
       }
 
       return toPlainObject(transfer);
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof AppError) {
         throw error;
       }
-      throw new Error('Invalid transfer ID');
+      throw new AppError(400, 'Invalid transfer ID');
     }
   },
 
@@ -306,7 +306,7 @@ export const srTransferService = {
   ): Promise<TransferType | null> {
     const existingTransfer = await SrTransfer.findById(id);
     if (!existingTransfer || existingTransfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     // Prevent certain updates based on status
@@ -316,7 +316,10 @@ export const srTransferService = {
       const invalidUpdates = updateKeys.filter(key => !allowedUpdates.includes(key));
 
       if (invalidUpdates.length > 0) {
-        throw new Error(`Cannot update ${invalidUpdates.join(', ')} for a completed transfer`);
+        throw new AppError(
+          400,
+          `Cannot update ${invalidUpdates.join(', ')} for a completed transfer`
+        );
       }
     }
 
@@ -324,11 +327,11 @@ export const srTransferService = {
     if (data.nomineeId) {
       const nominee = await Nominee.findById(data.nomineeId);
       if (!nominee || nominee.isDeleted) {
-        throw new Error('Nominee not found');
+        throw new AppError(404, 'Nominee not found');
       }
       // Verify nominee belongs to buyer
       if (nominee.memId.toString() !== existingTransfer.buyerMemId.toString()) {
-        throw new Error('Nominee does not belong to the buyer');
+        throw new AppError(400, 'Nominee does not belong to the buyer');
       }
     }
 
@@ -373,12 +376,12 @@ export const srTransferService = {
   async deleteTransfer(id: string, userId: Types.ObjectId): Promise<boolean> {
     const existingTransfer = await SrTransfer.findById(id);
     if (!existingTransfer || existingTransfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     // Don't allow deletion of completed transfers
     if (existingTransfer.status === TransferStatus.COMPLETED) {
-      throw new Error('Cannot delete a completed transfer');
+      throw new AppError(400, 'Cannot delete a completed transfer');
     }
 
     const result = await SrTransfer.findByIdAndUpdate(
@@ -408,7 +411,7 @@ export const srTransferService = {
   ): Promise<TransferType | null> {
     const transfer = await SrTransfer.findById(id);
     if (!transfer || transfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     if (transfer.transferFeePaid) {
@@ -476,7 +479,7 @@ export const srTransferService = {
   ): Promise<TransferType | null> {
     const transfer = await SrTransfer.findById(id);
     if (!transfer || transfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     if (transfer.status !== TransferStatus.APPROVED) {
@@ -581,7 +584,7 @@ export const srTransferService = {
   ): Promise<TransferType | null> {
     const transfer = await SrTransfer.findById(transferId);
     if (!transfer || transfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     const existingFiles = await uploadService.getFilesByEntity(EntityType.TRANSFER, transferId);
@@ -1003,7 +1006,7 @@ export const srTransferService = {
       try {
         return new Types.ObjectId(id);
       } catch (error) {
-        throw new Error(`Invalid transfer ID: ${id}`);
+        throw new AppError(400, `Invalid transfer ID: ${id}`);
       }
     });
 
@@ -1049,7 +1052,7 @@ export const srTransferService = {
       .populate('modifiedByUser', 'userName fullName');
 
     if (!transfer || transfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     const timeline: TransferTimelineItem[] = [];
@@ -1146,7 +1149,7 @@ export const srTransferService = {
   }> {
     const transfer = await SrTransfer.findById(transferId);
     if (!transfer || transfer.isDeleted) {
-      throw new Error('Transfer not found');
+      throw new AppError(404, 'Transfer not found');
     }
 
     const requirements: string[] = [
