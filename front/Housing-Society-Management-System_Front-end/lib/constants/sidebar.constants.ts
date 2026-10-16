@@ -945,6 +945,7 @@ export const SIDEBAR_VISIBILITY: {
     "ai-automation": false,
     vendors: false,
     workforce: false,
+    "visitor-facility": false,
   },
   items: {
     gamification: false,
