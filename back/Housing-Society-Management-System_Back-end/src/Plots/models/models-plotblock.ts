@@ -123,16 +123,18 @@ plotBlockSchema.pre('validate', function (next) {
       const unit = normalizeAreaUnit(this.blockAreaUnit);
       const newAreaBase = toBaseSqft(this.blockTotalArea, unit);
 
+      // Check shrink against allocated plots using canonical sqft, not display unit
       if (!this.isNew && this.allocatedBase) {
         const allocated = new Decimal(decimalToString(this.allocatedBase));
         const newArea = new Decimal(newAreaBase.toString());
         if (newArea.lessThan(allocated)) {
-          const allocatedDisplay = fromBaseSqft(this.allocatedBase, unit);
+          const allocatedDisplay = fromBaseSqft(this.allocatedBase, 'sqft');
+          const newAreaDisplay = fromBaseSqft(newAreaBase, 'sqft');
           next(
             new AppError(
               400,
               `Cannot shrink plot block area below what is already allocated to plots ` +
-              `(${allocatedDisplay} ${unit} already allocated).`
+              `(${allocatedDisplay} sqft allocated, trying to shrink to ${newAreaDisplay} sqft).`
             ) as any
           );
           return;
@@ -174,15 +176,17 @@ plotBlockSchema.pre('findOneAndUpdate', async function (next) {
     const unit = normalizeAreaUnit(blockAreaUnitRaw);
     const newAreaBase = toBaseSqft(blockTotalArea, unit);
 
+    // Check shrink against allocated plots using canonical sqft, not display unit
     const allocated = new Decimal(decimalToString(current.allocatedBase));
     const newArea = new Decimal(newAreaBase.toString());
     if (newArea.lessThan(allocated)) {
-      const allocatedDisplay = fromBaseSqft(current.allocatedBase, unit);
+      const allocatedDisplay = fromBaseSqft(current.allocatedBase, 'sqft');
+      const newAreaDisplay = fromBaseSqft(newAreaBase, 'sqft');
       next(
         new AppError(
           400,
           `Cannot shrink plot block area below what is already allocated to plots ` +
-          `(${allocatedDisplay} ${unit} already allocated).`
+          `(${allocatedDisplay} sqft allocated, trying to shrink to ${newAreaDisplay} sqft).`
         ) as any
       );
       return;

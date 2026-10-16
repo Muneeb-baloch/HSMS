@@ -12,10 +12,13 @@ export const AREA_UNITS: AreaUnit[] = ['marla', 'kanal', 'acre', 'hectare', 'sqy
 
 // 1 <unit> = X sqft. Marla/Kanal use the Pakistani standard (1 Marla = 225 sqft),
 // matching the values already used by this codebase's own seed data.
+// DECISION: 225 sqft per marla is HARDCODED. This is deliberate—it's the Pakistani standard
+// for real estate and matches existing seed data. If conversion standards change, update this
+// constant and existing areaBase values in the database must be recomputed.
 const TO_SQFT: Record<AreaUnit, string> = {
   sqft: '1',
   sqyd: '9', // 1 square yard / Gaz
-  marla: '225',
+  marla: '225', // Pakistani standard (hardcoded)
   kanal: '4500', // 20 Marla
   acre: '43560',
   hectare: '107639.1041671',

@@ -12,6 +12,7 @@ import {
 import { plotService } from '../index-plot';
 import PlotBlock from '../models/models-plotblock';
 import Plot from '../models/models-plot';
+import PlotSize from '../models/models-plotsize';
 import {
   BulkPlotUpdateDto,
   CreatePlotDto,
@@ -25,6 +26,25 @@ import {
 const handleError = (error: any, next: NextFunction) => {
   next(error);
 };
+
+// Helper: check if plot area differs from its PlotSize by >5%
+async function getSizeWarning(plotSizeId: any, areaBase: any): Promise<string | undefined> {
+  if (!plotSizeId) return undefined;
+  try {
+    const plotSize = await PlotSize.findById(plotSizeId);
+    if (!plotSize) return undefined;
+    const psSizeBase = toBaseSqft(plotSize.totalArea, plotSize.areaUnit as any);
+    const psDisplay = fromBaseSqft(psSizeBase, plotSize.areaUnit as any, 2);
+    const plotDisplay = fromBaseSqft(areaBase, 'sqft', 2);
+    const diffPercent = Math.abs((plotDisplay - psDisplay) / psDisplay) * 100;
+    if (diffPercent > 5) {
+      return `Plot area (${plotDisplay} sqft) differs from PlotSize "${plotSize.plotSizeName}" (${psDisplay} ${plotSize.areaUnit}) by ${diffPercent.toFixed(1)}%`;
+    }
+  } catch (err) {
+    // Silently ignore lookup errors
+  }
+  return undefined;
+}
 
 export const plotController = {
   /**
@@ -105,10 +125,12 @@ export const plotController = {
           reserveAreaOnParent(PlotBlock, block._id, negateBase(deltaBase), session, 'Plot Block', unit),
       });
 
+      const sizeWarning = await getSizeWarning(createData.plotSizeId, deltaBase);
       res.status(201).json({
         success: true,
         data: plot,
         message: 'Plot created successfully',
+        ...(sizeWarning && { warning: sizeWarning }),
       });
     } catch (error) {
       handleError(error, next);
@@ -310,7 +332,13 @@ export const plotController = {
               newUnit
             ),
         });
-        res.json({ success: true, data: updatedPlot, message: 'Plot updated successfully' });
+        const sizeWarning = await getSizeWarning(updateData.plotSizeId || existingPlot.plotSizeId, newAreaBase);
+        res.json({
+          success: true,
+          data: updatedPlot,
+          message: 'Plot updated successfully',
+          ...(sizeWarning && { warning: sizeWarning }),
+        });
         return;
       }
 
@@ -357,10 +385,12 @@ export const plotController = {
         },
       });
 
+      const sizeWarning = await getSizeWarning(updateData.plotSizeId || existingPlot.plotSizeId, newAreaBase);
       res.json({
         success: true,
         data: updatedPlot,
         message: 'Plot updated successfully',
+        ...(sizeWarning && { warning: sizeWarning }),
       });
     } catch (error) {
       handleError(error, next);

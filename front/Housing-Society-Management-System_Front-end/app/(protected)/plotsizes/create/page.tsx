@@ -59,27 +59,9 @@ export default function CreatePlotSizePage () {
     try {
       const formData = data as CreatePlotSizeDto & { projectId?: string; totalArea?: number; areaUnit?: string }
 
-      // Validate that plot size doesn't exceed project's total area (only if same unit)
-      if (formData.projectId && formData.totalArea && formData.areaUnit) {
-        const selectedProject = projects?.items?.find(p => p._id === formData.projectId)
-        if (selectedProject) {
-          // Only validate if area units match
-          if (formData.areaUnit === selectedProject.areaUnit) {
-            if (formData.totalArea > selectedProject.totalArea) {
-              customToast.error(
-                `Plot size (${formData.totalArea} ${formData.areaUnit}) cannot exceed project total area (${selectedProject.totalArea} ${selectedProject.areaUnit})`
-              )
-              return
-            }
-          } else {
-            // Warn if units don't match
-            customToast.error(
-              `Area unit mismatch! Project uses "${selectedProject.areaUnit}" but plot size uses "${formData.areaUnit}". Please use the same unit.`
-            )
-            return
-          }
-        }
-      }
+      // PlotSize is a template, not allocated land - no project capacity check needed.
+      // Backend validates PlotBlock capacity against Project, not PlotSize.
+      // Different units are allowed at each level; validation uses canonical sqft.
 
       // Transform data - convert strings to numbers
       const submitData = {

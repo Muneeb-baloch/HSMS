@@ -57,9 +57,9 @@ export const plotBlockController = {
         throw new AppError(404, 'Project not found');
       }
 
-      // Block always inherits the project's unit - prevents a unit mismatch from
-      // silently bypassing the area check.
-      const unit = normalizeAreaUnit(project.areaUnit);
+      // Block can use any unit; area comparison is done in canonical sqft (areaBase),
+      // not the display unit. This allows Project (kanal) → Block (marla), etc.
+      const unit = normalizeAreaUnit(createData.blockAreaUnit || 'sqft');
       createData.blockAreaUnit = unit;
       const deltaBase = toBaseSqft(createData.blockTotalArea, unit);
 
@@ -228,13 +228,8 @@ export const plotBlockController = {
         throw new AppError(400, 'Block Total Area must be greater than 0');
       }
 
-      if (isMovingProject && oldProject.areaUnit !== newProject.areaUnit && !isResizing) {
-        throw new AppError(
-          400,
-          `Target project uses a different area unit (${newProject.areaUnit}) than the current one ` +
-          `(${oldProject.areaUnit}). Please re-enter the Total Area in the new unit to move this block.`
-        );
-      }
+      // Allow moving between projects with different units; block keeps its current unit.
+      // Area comparison is always in canonical sqft (areaBase), so unit differences don't matter.
 
       const newUnit = normalizeAreaUnit(newProject.areaUnit);
       updateData.blockAreaUnit = newUnit;
