@@ -9,8 +9,24 @@ export enum PossessionStatus {
 
 export interface Possession {
   _id: string;
-  fileId: string | { _id: string; fileRegNo: string; plotId?: string };
-  plotId: string | { _id: string; plotNo: string; plotSize?: string; blockName?: string };
+  fileId:
+    | string
+    | {
+        _id: string;
+        fileNumber: string;
+        customerName?: string;
+        customerCnic?: string;
+        customerPhone?: string;
+      };
+  plotId:
+    | string
+    | {
+        _id: string;
+        plotNumber: string;
+        plotSize?: string;
+        blockName?: string;
+        projName?: string;
+      };
   possessionStatus: PossessionStatus;
   possessionCode: string;
 
@@ -137,4 +153,22 @@ export interface CollectorUpdateDto {
   collectorNic: string;
   collectionDate: Date;
   isCollected: boolean;
+}
+
+export interface PossessionStatistics {
+  totalCount: number;
+  collectedCount: number;
+  pendingCount: number;
+  byStatus: Record<PossessionStatus, number>;
+  processingTimes: {
+    avgProcessingDays: number;
+    minProcessingDays: number;
+    maxProcessingDays: number;
+  };
+  detailedStats: Array<{
+    _id: PossessionStatus;
+    count: number;
+    avgDurationDays: number | null;
+    collectedCount: number;
+  }>;
 }

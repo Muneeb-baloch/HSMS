@@ -1,4 +1,3 @@
-// src/app/(dashboard)/permissions/statistics/page.tsx
 'use client'
 
 import { Button } from '@/components/ui/button'
@@ -22,63 +21,38 @@ import {
   Pie,
   Cell
 } from 'recharts'
-import { useUserPermissionStatistics } from '@/lib/hooks/entities/useUserPermission'
-import { AccessType } from '@/lib/types/userpermission'
+import { usePossessionStatistics } from '@/lib/hooks/entities/usePossession'
+import { PossessionStatistics } from '@/lib/types/possession'
 import {
   ArrowLeft,
-  BarChart3,
-  PieChart as PieChartIcon,
-  Shield
+  CheckCircle,
+  ClipboardCheck,
+  Clock,
+  PieChart as PieChartIcon
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { StatsPageSkeleton } from '@/components/shared/PageSkeleton'
 
-const COLORS = [
-  '#0088FE',
-  '#00C49F',
-  '#FFBB28',
-  '#FF8042',
-  '#8884D8',
-  '#82CA9D'
-]
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D']
 
-export default function PermissionsStatisticsPage () {
+export default function PossessionsStatisticsPage () {
   const router = useRouter()
-  const { data: stats, isLoading } = useUserPermissionStatistics()
+  const { data, isLoading } = usePossessionStatistics()
+  const stats = data as PossessionStatistics | undefined
 
   if (isLoading) {
     return <StatsPageSkeleton />
   }
 
-  // Prepare data for charts
-  const accessTypeData = stats
-    ? Object.entries(stats.byAccessType).map(([name, value]) => ({
-        name,
-        value
-      }))
+  const byStatusData = stats
+    ? Object.entries(stats.byStatus).map(([name, value]) => ({ name, value }))
     : []
 
-  const permissionDistributionData = stats
-    ? [
-        { name: 'Read', value: stats.permissionDistribution.read },
-        { name: 'Create', value: stats.permissionDistribution.create },
-        { name: 'Update', value: stats.permissionDistribution.update },
-        { name: 'Delete', value: stats.permissionDistribution.delete },
-        { name: 'Export', value: stats.permissionDistribution.export },
-        { name: 'Import', value: stats.permissionDistribution.import },
-        { name: 'Approve', value: stats.permissionDistribution.approve },
-        { name: 'Verify', value: stats.permissionDistribution.verify }
-      ]
-    : []
-
-  const moduleData = stats
-    ? Object.entries(stats.byModule)
-        .slice(0, 10)
-        .map(([name, value]) => ({
-          name: name.length > 15 ? name.substring(0, 15) + '...' : name,
-          value
-        }))
-    : []
+  const handedOverCount = stats?.byStatus?.handed_over || 0
+  const completionRate =
+    stats && stats.totalCount > 0
+      ? ((handedOverCount / stats.totalCount) * 100).toFixed(1)
+      : '0.0'
 
   return (
     <div className='space-y-1'>
@@ -88,9 +62,9 @@ export default function PermissionsStatisticsPage () {
       </Button>
 
       <div className='mb-8'>
-        <h1 className='text-3xl font-bold mb-2'>Permission Statistics</h1>
+        <h1 className='text-3xl font-bold mb-2'>Possession Statistics</h1>
         <p className='text-gray-600'>
-          Comprehensive overview of permission distribution and access patterns
+          Overview of possession requests by status and processing time
         </p>
       </div>
 
@@ -100,13 +74,11 @@ export default function PermissionsStatisticsPage () {
           <CardContent className='pt-6'>
             <div className='flex items-center justify-between'>
               <div>
-                <div className='text-sm text-gray-500'>Total Permissions</div>
-                <div className='text-3xl font-bold'>
-                  {stats?.totalPermissions || 0}
-                </div>
+                <div className='text-sm text-gray-500'>Total Possessions</div>
+                <div className='text-3xl font-bold'>{stats?.totalCount || 0}</div>
               </div>
               <div className='p-3 bg-blue-100 rounded-full'>
-                <Shield className='h-6 w-6 text-blue-600' />
+                <ClipboardCheck className='h-6 w-6 text-blue-600' />
               </div>
             </div>
           </CardContent>
@@ -116,13 +88,11 @@ export default function PermissionsStatisticsPage () {
           <CardContent className='pt-6'>
             <div className='flex items-center justify-between'>
               <div>
-                <div className='text-sm text-gray-500'>Active Permissions</div>
-                <div className='text-3xl font-bold'>
-                  {stats?.activePermissions || 0}
-                </div>
+                <div className='text-sm text-gray-500'>Pending</div>
+                <div className='text-3xl font-bold'>{stats?.pendingCount || 0}</div>
               </div>
-              <div className='p-3 bg-green-100 rounded-full'>
-                <BarChart3 className='h-6 w-6 text-green-600' />
+              <div className='p-3 bg-amber-100 rounded-full'>
+                <Clock className='h-6 w-6 text-amber-600' />
               </div>
             </div>
           </CardContent>
@@ -132,12 +102,8 @@ export default function PermissionsStatisticsPage () {
           <CardContent className='pt-6'>
             <div className='flex items-center justify-between'>
               <div>
-                <div className='text-sm text-gray-500'>
-                  Modules with Permissions
-                </div>
-                <div className='text-3xl font-bold'>
-                  {stats?.modulesWithPermissions || 0}
-                </div>
+                <div className='text-sm text-gray-500'>Letters Collected</div>
+                <div className='text-3xl font-bold'>{stats?.collectedCount || 0}</div>
               </div>
               <div className='p-3 bg-purple-100 rounded-full'>
                 <PieChartIcon className='h-6 w-6 text-purple-600' />
@@ -150,15 +116,11 @@ export default function PermissionsStatisticsPage () {
           <CardContent className='pt-6'>
             <div className='flex items-center justify-between'>
               <div>
-                <div className='text-sm text-gray-500'>
-                  Roles with Permissions
-                </div>
-                <div className='text-3xl font-bold'>
-                  {stats?.rolesWithPermissions || 0}
-                </div>
+                <div className='text-sm text-gray-500'>Handover Rate</div>
+                <div className='text-3xl font-bold'>{completionRate}%</div>
               </div>
-              <div className='p-3 bg-orange-100 rounded-full'>
-                <Shield className='h-6 w-6 text-orange-600' />
+              <div className='p-3 bg-green-100 rounded-full'>
+                <CheckCircle className='h-6 w-6 text-green-600' />
               </div>
             </div>
           </CardContent>
@@ -167,18 +129,15 @@ export default function PermissionsStatisticsPage () {
 
       {/* Charts */}
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-        {/* Access Type Distribution */}
-        <Card className='col-span-2'>
+        <Card>
           <CardHeader>
-            <CardTitle>Access Type Distribution</CardTitle>
-            <CardDescription>
-              Breakdown of permissions by access level
-            </CardDescription>
+            <CardTitle>Possessions by Status</CardTitle>
+            <CardDescription>Count of possession requests at each status</CardDescription>
           </CardHeader>
           <CardContent>
             <div className='h-80'>
               <ResponsiveContainer width='100%' height='100%'>
-                <BarChart data={accessTypeData}>
+                <BarChart data={byStatusData}>
                   <CartesianGrid strokeDasharray='3 3' />
                   <XAxis dataKey='name' />
                   <YAxis />
@@ -191,78 +150,89 @@ export default function PermissionsStatisticsPage () {
           </CardContent>
         </Card>
 
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-          {/* Permission Type Distribution */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Permission Types</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className='h-64'>
-                <ResponsiveContainer width='100%' height='100%'>
-                  <PieChart>
-                    <Pie
-                      data={permissionDistributionData}
-                      cx='50%'
-                      cy='50%'
-                      labelLine={false}
-                      label={entry => `${entry.name}: ${entry.value}`}
-                      outerRadius={80}
-                      fill='#8884d8'
-                      dataKey='value'
-                    >
-                      {permissionDistributionData.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={COLORS[index % COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Top Modules */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Top Modules by Permissions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className='h-64'>
-                <ResponsiveContainer width='100%' height='100%'>
-                  <BarChart data={moduleData} layout='vertical'>
-                    <CartesianGrid strokeDasharray='3 3' />
-                    <XAxis type='number' />
-                    <YAxis type='category' dataKey='name' width={80} />
-                    <Tooltip />
-                    <Bar dataKey='value' fill='#82ca9d' />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Status Distribution</CardTitle>
+            <CardDescription>Share of possessions in each status</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className='h-80'>
+              <ResponsiveContainer width='100%' height='100%'>
+                <PieChart>
+                  <Pie
+                    data={byStatusData}
+                    cx='50%'
+                    cy='50%'
+                    labelLine={false}
+                    label={entry => `${entry.name}: ${entry.value}`}
+                    outerRadius={100}
+                    fill='#8884d8'
+                    dataKey='value'
+                  >
+                    {byStatusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Detailed Stats */}
+      {/* Processing Times */}
       <Card className='mt-6'>
         <CardHeader>
-          <CardTitle>Detailed Statistics</CardTitle>
+          <CardTitle>Processing Time (Handed Over Possessions)</CardTitle>
+          <CardDescription>
+            Days between application date and handover date
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'>
-            {permissionDistributionData.map(item => (
-              <div
-                key={item.name}
-                className='text-center p-4 bg-gray-50 rounded-lg'
-              >
-                <div className='text-2xl font-bold'>{item.value}</div>
-                <div className='text-sm text-gray-600'>
-                  {item.name} Permissions
+          <div className='grid grid-cols-1 md:grid-cols-3 gap-6'>
+            <div className='text-center p-4 bg-gray-50 rounded-lg'>
+              <div className='text-2xl font-bold'>
+                {stats?.processingTimes?.avgProcessingDays
+                  ? stats.processingTimes.avgProcessingDays.toFixed(1)
+                  : 0}
+              </div>
+              <div className='text-sm text-gray-600'>Average Days</div>
+            </div>
+            <div className='text-center p-4 bg-gray-50 rounded-lg'>
+              <div className='text-2xl font-bold'>
+                {stats?.processingTimes?.minProcessingDays?.toFixed(0) ?? 0}
+              </div>
+              <div className='text-sm text-gray-600'>Fastest (Days)</div>
+            </div>
+            <div className='text-center p-4 bg-gray-50 rounded-lg'>
+              <div className='text-2xl font-bold'>
+                {stats?.processingTimes?.maxProcessingDays?.toFixed(0) ?? 0}
+              </div>
+              <div className='text-sm text-gray-600'>Slowest (Days)</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Detailed Stats Table */}
+      <Card className='mt-6'>
+        <CardHeader>
+          <CardTitle>Detailed Statistics by Status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+            {stats?.detailedStats?.map(item => (
+              <div key={item._id} className='text-center p-4 bg-gray-50 rounded-lg'>
+                <div className='text-2xl font-bold'>{item.count}</div>
+                <div className='text-sm text-gray-600 capitalize'>
+                  {item._id.replace('_', ' ')}
                 </div>
+                {item.avgDurationDays != null && (
+                  <div className='text-xs text-gray-400 mt-1'>
+                    Avg {item.avgDurationDays.toFixed(1)} days
+                  </div>
+                )}
               </div>
             ))}
           </div>

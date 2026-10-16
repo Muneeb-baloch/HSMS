@@ -1,4 +1,3 @@
-// src/app/(dashboard)/permissions/view/[id]/page.tsx
 'use client'
 
 import { Badge } from '@/components/ui/badge'
@@ -12,63 +11,70 @@ import {
 } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { hasPermission, UserRole } from '@/lib/constants/roles'
-import { useUserPermission } from '@/lib/hooks/entities/useUserPermission'
+import { useDeletePossession, usePossession } from '@/lib/hooks/entities/usePossession'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { AccessType } from '@/lib/types/userpermission'
+import { useConfirm } from '@/components/shared/ConfirmDialog'
+import { PossessionStatus } from '@/lib/types/possession'
+import { formatDate } from '@/lib/utils/format'
 import {
   ArrowLeft,
+  Calendar,
   CheckCircle,
   Edit,
-  Shield,
+  FileText,
+  MapPin,
   Trash2,
-  User,
-  Zap
+  User
 } from 'lucide-react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { DetailPageSkeleton } from '@/components/shared/PageSkeleton'
-import { useConfirm } from "@/components/shared/ConfirmDialog";
 
-export default function ViewPermissionPage () {
+const statusColors: Record<string, string> = {
+  [PossessionStatus.REQUESTED]: 'bg-blue-100 text-blue-800 border-blue-200',
+  [PossessionStatus.SURVEYED]: 'bg-orange-100 text-orange-800 border-orange-200',
+  [PossessionStatus.READY]: 'bg-green-100 text-green-800 border-green-200',
+  [PossessionStatus.HANDED_OVER]: 'bg-purple-100 text-purple-800 border-purple-200',
+  [PossessionStatus.CANCELLED]: 'bg-red-100 text-red-800 border-red-200',
+  [PossessionStatus.ON_HOLD]: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+}
+
+export default function ViewPossessionPage () {
   const router = useRouter()
   const params = useParams()
   const { user } = useAuth()
-  const { confirm } = useConfirm();
+  const { confirm } = useConfirm()
 
   const id = params.id as string
-  const { data: permission, isLoading } = useUserPermission(id)
+  const { data: possession, isLoading } = usePossession(id)
+  const deleteMutation = useDeletePossession()
 
   const canUpdate =
     user &&
-    hasPermission(
-      user.role as UserRole,
-      [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[]
-    )
+    hasPermission(user.role as UserRole, [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[])
 
   const canDelete =
     user &&
-    hasPermission(
-      user.role as UserRole,
-      [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[]
-    )
+    hasPermission(user.role as UserRole, [UserRole.ADMIN, UserRole.SUPER_ADMIN] as UserRole[])
 
   if (isLoading) {
     return <DetailPageSkeleton />
   }
 
-  if (!permission) {
+  if (!possession) {
     return (
       <div className='p-6'>
         <Card>
           <CardHeader>
-            <CardTitle>Permission Not Found</CardTitle>
+            <CardTitle>Possession Not Found</CardTitle>
             <CardDescription>
-              The requested permission does not exist or has been deleted.
+              The requested possession does not exist or has been deleted.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => router.push('/permissions')}>
+            <Button onClick={() => router.push('/possessions')}>
               <ArrowLeft className='mr-2 h-4 w-4' />
-              Back to Permissions
+              Back to Possessions
             </Button>
           </CardContent>
         </Card>
@@ -76,43 +82,10 @@ export default function ViewPermissionPage () {
     )
   }
 
-  const moduleName =
-    typeof permission.srModuleId === 'object'
-      ? permission.srModuleId.moduleName
-      : permission.moduleName
-
-  const moduleCode =
-    typeof permission.srModuleId === 'object'
-      ? permission.srModuleId.moduleCode
-      : ''
-
-  const roleName =
-    typeof permission.roleId === 'object' ? permission.roleId.roleName : ''
-
-  const roleCode =
-    typeof permission.roleId === 'object' ? permission.roleId.roleCode : ''
-
-  const accessType = permission.accessType || AccessType.NO_ACCESS
-
-  const accessTypeColors = {
-    [AccessType.NO_ACCESS]: 'bg-red-100 text-red-800',
-    [AccessType.VIEW_ONLY]: 'bg-yellow-100 text-yellow-800',
-    [AccessType.LIMITED_ACCESS]: 'bg-blue-100 text-blue-800',
-    [AccessType.FULL_ACCESS]: 'bg-green-100 text-green-800'
-  }
-
-  const permissions = [
-    { label: 'Read', value: permission.canRead },
-    { label: 'Create', value: permission.canCreate },
-    { label: 'Update', value: permission.canUpdate },
-    { label: 'Delete', value: permission.canDelete },
-    { label: 'Export', value: permission.canExport },
-    { label: 'Import', value: permission.canImport },
-    { label: 'Approve', value: permission.canApprove },
-    { label: 'Verify', value: permission.canVerify }
-  ]
-
-  const activePermissions = permissions.filter(p => p.value)
+  const file = typeof possession.fileId === 'object' ? possession.fileId : null
+  const plot = typeof possession.plotId === 'object' ? possession.plotId : null
+  const csr =
+    typeof possession.possessionHandoverCSR === 'object' ? possession.possessionHandoverCSR : null
 
   return (
     <div className='space-y-1'>
@@ -122,190 +95,234 @@ export default function ViewPermissionPage () {
       </Button>
 
       <div className='grid grid-cols-1 lg:grid-cols-3 gap-6'>
-        {/* Main Permission Card */}
-        <div className='lg:col-span-2'>
-          <Card className='mb-6'>
+        <div className='lg:col-span-2 space-y-6'>
+          <Card>
             <CardHeader>
               <div className='flex justify-between items-start'>
                 <div>
-                  <CardTitle className='text-2xl'>{moduleName}</CardTitle>
+                  <CardTitle className='text-2xl'>{possession.possessionCode}</CardTitle>
                   <CardDescription>
-                    Permission for {roleName} role
+                    Possession request for plot {plot?.plotNumber || 'N/A'}
                   </CardDescription>
                 </div>
-                <div className='flex gap-2'>
-                  <Badge className={accessTypeColors[accessType]}>
-                    {accessType}
-                  </Badge>
-                  <Badge
-                    className={
-                      permission.isActive
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
-                    }
-                  >
-                    {permission.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
-                </div>
+                <Badge
+                  className={
+                    statusColors[possession.possessionStatus] || 'bg-gray-100 text-gray-800'
+                  }
+                >
+                  {possession.statusDisplayName || possession.possessionStatus}
+                </Badge>
               </div>
             </CardHeader>
             <CardContent className='space-y-6'>
-              {/* Module and Role Info */}
               <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
                 <div className='space-y-3'>
                   <div className='flex items-center gap-2'>
-                    <Shield className='h-5 w-5 text-gray-400' />
-                    <h3 className='font-semibold'>Module Information</h3>
+                    <FileText className='h-5 w-5 text-gray-400' />
+                    <h3 className='font-semibold'>File Information</h3>
                   </div>
                   <div className='space-y-2 pl-7'>
                     <div>
-                      <div className='text-sm text-gray-500'>Module Name</div>
-                      <div className='font-medium'>{moduleName}</div>
+                      <div className='text-sm text-gray-500'>File Number</div>
+                      <div className='font-medium'>{file?.fileNumber || 'N/A'}</div>
                     </div>
-                    {moduleCode && (
+                    <div>
+                      <div className='text-sm text-gray-500'>Member</div>
+                      <div className='font-medium'>{file?.customerName || 'N/A'}</div>
+                    </div>
+                    {file?.customerCnic && (
                       <div>
-                        <div className='text-sm text-gray-500'>Module Code</div>
-                        <div className='font-medium'>{moduleCode}</div>
+                        <div className='text-sm text-gray-500'>CNIC</div>
+                        <div className='font-medium'>{file.customerCnic}</div>
                       </div>
                     )}
-                    {typeof permission.srModuleId === 'object' &&
-                      permission.srModuleId.routePath && (
-                        <div>
-                          <div className='text-sm text-gray-500'>
-                            Route Path
-                          </div>
-                          <div className='font-medium text-blue-600'>
-                            {permission.srModuleId.routePath}
-                          </div>
-                        </div>
-                      )}
+                    {file && (
+                      <Button variant='outline' size='sm' asChild>
+                        <Link href={`/file/${file._id}`}>View File</Link>
+                      </Button>
+                    )}
                   </div>
                 </div>
 
                 <div className='space-y-3'>
                   <div className='flex items-center gap-2'>
-                    <User className='h-5 w-5 text-gray-400' />
-                    <h3 className='font-semibold'>Role Information</h3>
+                    <MapPin className='h-5 w-5 text-gray-400' />
+                    <h3 className='font-semibold'>Plot Information</h3>
                   </div>
                   <div className='space-y-2 pl-7'>
                     <div>
-                      <div className='text-sm text-gray-500'>Role Name</div>
-                      <div className='font-medium'>{roleName}</div>
+                      <div className='text-sm text-gray-500'>Plot Number</div>
+                      <div className='font-medium'>{plot?.plotNumber || 'N/A'}</div>
                     </div>
-                    {roleCode && (
+                    {plot?.blockName && (
                       <div>
-                        <div className='text-sm text-gray-500'>Role Code</div>
-                        <div className='font-medium'>{roleCode}</div>
+                        <div className='text-sm text-gray-500'>Block</div>
+                        <div className='font-medium'>{plot.blockName}</div>
                       </div>
                     )}
-                    {typeof permission.roleId === 'object' &&
-                      permission.roleId.description && (
-                        <div>
-                          <div className='text-sm text-gray-500'>
-                            Description
-                          </div>
-                          <div className='font-medium'>
-                            {permission.roleId.description}
-                          </div>
-                        </div>
-                      )}
+                    {plot?.plotSize && (
+                      <div>
+                        <div className='text-sm text-gray-500'>Plot Size</div>
+                        <div className='font-medium'>{plot.plotSize}</div>
+                      </div>
+                    )}
+                    {plot && (
+                      <Button variant='outline' size='sm' asChild>
+                        <Link href={`/plots/view/${plot._id}`}>View Plot</Link>
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
 
               <Separator />
 
-              {/* Permissions Grid */}
-              <div className='space-y-4'>
+              <div className='space-y-3'>
                 <div className='flex items-center gap-2'>
-                  <Zap className='h-5 w-5 text-gray-400' />
-                  <h3 className='font-semibold'>Access Permissions</h3>
+                  <Calendar className='h-5 w-5 text-gray-400' />
+                  <h3 className='font-semibold'>Timeline</h3>
                 </div>
-                <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-                  {permissions.map(perm => (
-                    <div
-                      key={perm.label}
-                      className={`p-4 rounded-lg border ${
-                        perm.value
-                          ? 'bg-green-50 border-green-200'
-                          : 'bg-gray-50 border-gray-200'
-                      }`}
-                    >
-                      <div className='flex items-center justify-between'>
-                        <div className='font-medium'>{perm.label}</div>
-                        {perm.value ? (
-                          <CheckCircle className='h-5 w-5 text-green-600' />
-                        ) : (
-                          <div className='h-5 w-5' />
-                        )}
-                      </div>
-                      <div className='text-sm text-gray-500 mt-1'>
-                        {perm.value ? 'Allowed' : 'Not Allowed'}
-                      </div>
+                <div className='grid grid-cols-2 md:grid-cols-4 gap-4 pl-7'>
+                  <div>
+                    <div className='text-sm text-gray-500'>Application Date</div>
+                    <div className='font-medium'>{formatDate(possession.possessionInitDate)}</div>
+                  </div>
+                  <div>
+                    <div className='text-sm text-gray-500'>Survey Date</div>
+                    <div className='font-medium'>
+                      {possession.possessionSurveyDate
+                        ? formatDate(possession.possessionSurveyDate)
+                        : 'N/A'}
                     </div>
-                  ))}
+                  </div>
+                  <div>
+                    <div className='text-sm text-gray-500'>Handover Date</div>
+                    <div className='font-medium'>
+                      {possession.possessionHandoverDate
+                        ? formatDate(possession.possessionHandoverDate)
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className='text-sm text-gray-500'>Duration</div>
+                    <div className='font-medium'>
+                      {possession.possessionDurationDays != null
+                        ? `${possession.possessionDurationDays} days`
+                        : `${possession.possessionAgeDays ?? 0} days (ongoing)`}
+                    </div>
+                  </div>
+                </div>
+                {possession.possessionSurveyPerson && (
+                  <div className='pl-7'>
+                    <div className='text-sm text-gray-500'>Survey Person</div>
+                    <div className='font-medium'>{possession.possessionSurveyPerson}</div>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              <div className='space-y-3'>
+                <div className='flex items-center gap-2'>
+                  <User className='h-5 w-5 text-gray-400' />
+                  <h3 className='font-semibold'>Handover CSR</h3>
+                </div>
+                <div className='pl-7'>
+                  <div className='font-medium'>
+                    {csr ? `${csr.firstName || ''} ${csr.lastName || ''}`.trim() : 'N/A'}
+                  </div>
+                  {csr?.email && <div className='text-sm text-gray-500'>{csr.email}</div>}
                 </div>
               </div>
+
+              {(possession.possessionRemarks ||
+                possession.possessionSurveyRemarks ||
+                possession.possessionHandoverRemarks) && (
+                <>
+                  <Separator />
+                  <div className='space-y-3'>
+                    {possession.possessionRemarks && (
+                      <div>
+                        <div className='text-sm text-gray-500'>Remarks</div>
+                        <div className='whitespace-pre-wrap'>{possession.possessionRemarks}</div>
+                      </div>
+                    )}
+                    {possession.possessionSurveyRemarks && (
+                      <div>
+                        <div className='text-sm text-gray-500'>Survey Remarks</div>
+                        <div className='whitespace-pre-wrap'>
+                          {possession.possessionSurveyRemarks}
+                        </div>
+                      </div>
+                    )}
+                    {possession.possessionHandoverRemarks && (
+                      <div>
+                        <div className='text-sm text-gray-500'>Handover Remarks</div>
+                        <div className='whitespace-pre-wrap'>
+                          {possession.possessionHandoverRemarks}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar Info */}
         <div className='space-y-6'>
-          {/* Permission Stats Card */}
           <Card>
             <CardHeader>
-              <CardTitle className='text-lg'>Permission Stats</CardTitle>
+              <CardTitle className='text-lg'>Collection Status</CardTitle>
             </CardHeader>
-            <CardContent className='space-y-4'>
-              <div className='space-y-3'>
-                <div className='flex justify-between items-center'>
-                  <div className='text-gray-600'>Total Permissions</div>
-                  <div className='font-semibold'>{permissions.length}</div>
-                </div>
-                <div className='flex justify-between items-center'>
-                  <div className='text-gray-600'>Active Permissions</div>
-                  <div className='font-semibold text-green-600'>
-                    {activePermissions.length}
-                  </div>
-                </div>
-                <div className='flex justify-between items-center'>
-                  <div className='text-gray-600'>Inactive Permissions</div>
-                  <div className='font-semibold text-gray-600'>
-                    {permissions.length - activePermissions.length}
-                  </div>
-                </div>
+            <CardContent className='space-y-3'>
+              <div className='flex justify-between items-center'>
+                <div className='text-gray-600'>Letter Collected</div>
+                <Badge
+                  className={
+                    possession.possessionIsCollected
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }
+                >
+                  {possession.possessionIsCollected ? 'Yes' : 'No'}
+                </Badge>
               </div>
-
-              <div className='pt-4 border-t'>
-                <div className='text-center'>
-                  <div className='text-3xl font-bold text-blue-600'>
-                    {Math.round(
-                      (activePermissions.length / permissions.length) * 100
-                    )}
-                    %
+              {possession.possessionIsCollected && (
+                <>
+                  <div>
+                    <div className='text-sm text-gray-500'>Collector Name</div>
+                    <div className='font-medium'>
+                      {possession.possessionCollectorName || 'N/A'}
+                    </div>
                   </div>
-                  <div className='text-sm text-gray-500'>
-                    Permission Coverage
+                  <div>
+                    <div className='text-sm text-gray-500'>Collector CNIC</div>
+                    <div className='font-medium'>{possession.possessionCollectorNic || 'N/A'}</div>
                   </div>
-                </div>
-              </div>
+                  <div>
+                    <div className='text-sm text-gray-500'>Collection Date</div>
+                    <div className='font-medium'>
+                      {formatDate(possession.possessionCollectionDate)}
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
-          {/* Action Buttons */}
           <Card>
             <CardHeader>
               <CardTitle className='text-lg'>Actions</CardTitle>
             </CardHeader>
             <CardContent className='space-y-3'>
-              {canUpdate && (
+              {canUpdate && (possession.allowedNextStatuses?.length ?? 0) > 0 && (
                 <Button
-                  onClick={() => router.push(`/permissions/edit/${id}`)}
+                  onClick={() => router.push(`/possessions/edit/${id}`)}
                   className='w-full'
                 >
                   <Edit className='mr-2 h-4 w-4' />
-                  Edit Permission
+                  Change Status
                 </Button>
               )}
               {canDelete && (
@@ -313,25 +330,52 @@ export default function ViewPermissionPage () {
                   variant='outline'
                   onClick={async () => {
                     if (
-                      await confirm({ title: "Delete", description: 'Are you sure you want to delete this permission?', variant: "destructive" })
+                      await confirm({
+                        title: 'Delete',
+                        description: 'Are you sure you want to delete this possession request?',
+                        variant: 'destructive'
+                      })
                     ) {
-                      router.push('/permissions')
+                      await deleteMutation.mutateAsync(id)
+                      router.push('/possessions')
                     }
                   }}
                   className='w-full'
                 >
                   <Trash2 className='mr-2 h-4 w-4' />
-                  Delete Permission
+                  Delete Possession
                 </Button>
               )}
               <Button
                 variant='outline'
-                onClick={() => router.push('/permissions')}
+                onClick={() => router.push('/possessions')}
                 className='w-full'
               >
                 <ArrowLeft className='mr-2 h-4 w-4' />
-                Back to Permissions
+                Back to Possessions
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className='text-lg'>System Information</CardTitle>
+            </CardHeader>
+            <CardContent className='space-y-2 text-sm'>
+              <div className='flex justify-between'>
+                <span className='text-gray-500'>Created</span>
+                <span>{formatDate(possession.createdAt)}</span>
+              </div>
+              <div className='flex justify-between'>
+                <span className='text-gray-500'>Last Updated</span>
+                <span>{formatDate(possession.updatedAt)}</span>
+              </div>
+              {(possession.allowedNextStatuses?.length ?? 0) > 0 && (
+                <div className='flex items-center gap-1 pt-2 text-green-700'>
+                  <CheckCircle className='h-4 w-4' />
+                  <span>Status can still be progressed</span>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
