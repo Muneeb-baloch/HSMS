@@ -95,6 +95,23 @@ export interface InstallmentQueryParams {
   sortOrder?: 'asc' | 'desc';
 }
 
+export interface InstallmentGroup {
+  fileId: string;
+  fileRegNo: string | null;
+  fileBarCode: string | null;
+  memberName: string | null;
+  memberNic: string | null;
+  plotNo: string | null;
+  installmentCount: number;
+  totalDue: number;
+  totalPaid: number;
+  balance: number;
+  statusCounts: Record<string, number>;
+  overdueCount: number;
+  nextDueDate: Date | null;
+  installments: InstallmentType[];
+}
+
 export interface InstallmentSummary {
   totalInstallments: number;
   totalAmountDue: number;

@@ -229,6 +229,38 @@ export const installmentController = {
   },
 
   /**
+   * Get installments grouped by file, paginated by file group
+   */
+  getGroupedInstallments: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const queryParams: InstallmentQueryParams = {
+        page: req.query.page ? parseInt(req.query.page as string) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 20,
+        installmentCategoryId: req.query.installmentCategoryId as string,
+        status: req.query.status as any,
+        installmentType: req.query.installmentType as any,
+        paymentMode: req.query.paymentMode as any,
+        fromDate: req.query.fromDate ? new Date(req.query.fromDate as string) : undefined,
+        toDate: req.query.toDate ? new Date(req.query.toDate as string) : undefined,
+        overdue: req.query.overdue ? req.query.overdue === 'true' : undefined,
+        search: req.query.search as string,
+      };
+
+      const result = await installmentService.getGroupedInstallments(queryParams);
+
+      res.json({
+        success: true,
+        data: {
+          groups: result.groups,
+          pagination: result.pagination,
+        },
+      });
+    } catch (error) {
+      handleError(error, next);
+    }
+  },
+
+  /**
    * Update installment
    */
   updateInstallment: async (req: AuthRequest, res: Response, next: NextFunction) => {

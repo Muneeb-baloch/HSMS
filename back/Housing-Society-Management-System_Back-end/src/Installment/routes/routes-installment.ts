@@ -67,6 +67,13 @@ router.get(
 );
 
 router.get(
+  '/grouped',
+  authenticate,
+  requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),
+  installmentController.getGroupedInstallments
+);
+
+router.get(
   '/file/:fileId',
   authenticate,
   requireRole(UserRole.ADMIN, UserRole.SUPER_ADMIN),

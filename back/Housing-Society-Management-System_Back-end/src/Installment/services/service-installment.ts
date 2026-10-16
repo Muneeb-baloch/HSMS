@@ -19,6 +19,7 @@ import {
   BulkInstallmentCreationDto,
   CreateInstallmentDto,
   InstallmentDashboardSummary,
+  InstallmentGroup,
   InstallmentType as InstallmentInterface,
   InstallmentQueryParams,
   InstallmentReport,
@@ -459,6 +460,230 @@ export const installmentService = {
       }
       throw new Error('Invalid installment ID');
     }
+  },
+
+  /**
+   * Get installments grouped by file, paginated by file group (not by row).
+   *
+   * status/installmentType/paymentMode/fromDate/toDate/overdue filter at the
+   * row level (same semantics as getInstallments) - a group is included only
+   * if at least one of its rows survives those filters, and only the
+   * surviving rows are returned inside that group (non-matching rows in an
+   * otherwise-included file are hidden).
+   *
+   * search matches File.fileRegNo/fileBarCode, Member.memName/memNic,
+   * Plot.plotNo, or installmentTitle - matching on ANY of a file's rows (or
+   * its file/member/plot identity) qualifies the WHOLE group, not just the
+   * matching row, so a file shows all its filter-passing rows regardless of
+   * which field the search term actually hit.
+   */
+  async getGroupedInstallments(params: InstallmentQueryParams): Promise<{
+    groups: InstallmentGroup[];
+    pagination: { page: number; limit: number; total: number; pages: number };
+  }> {
+    const {
+      page = 1,
+      limit = 20,
+      installmentCategoryId,
+      status,
+      installmentType,
+      paymentMode,
+      fromDate,
+      toDate,
+      overdue,
+      search,
+    } = params;
+
+    const skip = (page - 1) * limit;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    // Row-level filters - identical semantics to getInstallments above.
+    const matchStage: any = { isDeleted: false };
+
+    if (installmentCategoryId) {
+      matchStage.installmentCategoryId = new Types.ObjectId(installmentCategoryId);
+    }
+    if (status === InstallmentStatus.OVERDUE) {
+      matchStage.dueDate = { $lt: startOfToday };
+      matchStage.status = { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] };
+    } else if (status) {
+      matchStage.status = status;
+    }
+    if (installmentType) {
+      matchStage.installmentType = installmentType;
+    }
+    if (paymentMode) {
+      matchStage.paymentMode = paymentMode;
+    }
+    if (fromDate || toDate) {
+      matchStage.dueDate = { ...matchStage.dueDate };
+      if (fromDate) matchStage.dueDate.$gte = new Date(fromDate);
+      if (toDate) matchStage.dueDate.$lte = new Date(toDate);
+    }
+    if (overdue === true) {
+      matchStage.dueDate = { $lt: startOfToday };
+      matchStage.status = { $in: [InstallmentStatus.UNPAID, InstallmentStatus.PARTIALLY_PAID] };
+    } else if (overdue === false) {
+      matchStage.$or = [
+        { dueDate: { $gte: startOfToday } },
+        { status: { $in: [InstallmentStatus.PAID, InstallmentStatus.CANCELLED] } },
+      ];
+    }
+
+    const joinStages: any[] = [
+      { $lookup: { from: 'files', localField: 'fileId', foreignField: '_id', as: 'file' } },
+      { $unwind: '$file' },
+      { $lookup: { from: 'members', localField: 'file.memId', foreignField: '_id', as: 'member' } },
+      { $unwind: { path: '$member', preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: 'plots', localField: 'file.plotId', foreignField: '_id', as: 'plot' } },
+      { $unwind: { path: '$plot', preserveNullAndEmptyArrays: true } },
+    ];
+
+    // Phase 1: which files qualify (filters + search), sorted and paginated
+    // by FILE, not by row.
+    const qualifyPipeline: any[] = [{ $match: matchStage }, ...joinStages];
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      qualifyPipeline.push({
+        $match: {
+          $or: [
+            { 'file.fileRegNo': regex },
+            { 'file.fileBarCode': regex },
+            { 'member.memName': regex },
+            { 'member.memNic': regex },
+            { 'plot.plotNo': regex },
+            { installmentTitle: regex },
+          ],
+        },
+      });
+    }
+
+    qualifyPipeline.push({
+      $group: { _id: '$fileId', fileRegNo: { $first: '$file.fileRegNo' } },
+    });
+
+    const [countResult, pagedFileIdsResult] = await Promise.all([
+      Installment.aggregate([...qualifyPipeline, { $count: 'total' }]),
+      Installment.aggregate([
+        ...qualifyPipeline,
+        { $sort: { fileRegNo: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+      ]),
+    ]);
+
+    const total = countResult[0]?.total || 0;
+    const orderedFileIds: Types.ObjectId[] = pagedFileIdsResult.map((r: any) => r._id);
+
+    if (orderedFileIds.length === 0) {
+      return { groups: [], pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+    }
+
+    // Phase 2: fetch every filter-passing row for exactly this page's files
+    // (search is deliberately NOT reapplied here - a qualifying file shows
+    // all of its filter-passing rows, not just the one that matched search).
+    const rows = await populateFileMemberPlot(
+      Installment.find({ ...matchStage, fileId: { $in: orderedFileIds } }).populate(
+        'installmentCategory',
+        'instCatName'
+      ),
+      { fileSelect: 'fileRegNo fileBarCode', plotSelect: 'plotNo' }
+    )
+      .sort({ installmentNo: 1 })
+      .then(docs => docs.map(doc => toPlainObject(doc)));
+
+    const rowsByFileId = new Map<string, InstallmentInterface[]>();
+    for (const row of rows) {
+      const fid = String((row as any).fileId?._id ?? (row as any).fileId);
+      if (!rowsByFileId.has(fid)) rowsByFileId.set(fid, []);
+      rowsByFileId.get(fid)!.push(row);
+    }
+
+    const groups: InstallmentGroup[] = orderedFileIds.map(fileObjectId => {
+      const fid = String(fileObjectId);
+      const fileRows = rowsByFileId.get(fid) || [];
+      const first = fileRows[0] as any;
+      const file = first?.file || {};
+      const member = first?.member || {};
+      const plot = first?.plot || {};
+
+      let totalDue = 0;
+      let totalPaid = 0;
+      let overdueCount = 0;
+      let nextDueDate: Date | null = null;
+      const statusCounts: Record<string, number> = {
+        [InstallmentStatus.PAID]: 0,
+        [InstallmentStatus.PARTIALLY_PAID]: 0,
+        [InstallmentStatus.UNPAID]: 0,
+        [InstallmentStatus.CANCELLED]: 0,
+        [InstallmentStatus.REFUNDED]: 0,
+      };
+
+      for (const row of fileRows) {
+        const r = row as any;
+        const isCancelled = r.status === InstallmentStatus.CANCELLED;
+        const isRefunded = r.status === InstallmentStatus.REFUNDED;
+        if (!isCancelled) {
+          totalDue += r.totalPayable ?? 0;
+          totalPaid += r.amountPaid ?? 0;
+        }
+
+        const isFullyPaid = r.status === InstallmentStatus.PAID;
+        const isLiveOverdue =
+          !isFullyPaid &&
+          !isCancelled &&
+          !isRefunded &&
+          new Date(r.dueDate) < startOfToday;
+
+        if (isLiveOverdue) {
+          overdueCount++;
+        }
+
+        if (isFullyPaid) {
+          statusCounts[InstallmentStatus.PAID]++;
+        } else if (isCancelled) {
+          statusCounts[InstallmentStatus.CANCELLED]++;
+        } else if (isRefunded) {
+          statusCounts[InstallmentStatus.REFUNDED]++;
+        } else if (r.status === InstallmentStatus.PARTIALLY_PAID) {
+          statusCounts[InstallmentStatus.PARTIALLY_PAID]++;
+        } else {
+          statusCounts[InstallmentStatus.UNPAID]++;
+        }
+
+        if (!isFullyPaid && !isCancelled && !isRefunded) {
+          const due = new Date(r.dueDate);
+          if (!nextDueDate || due < nextDueDate) {
+            nextDueDate = due;
+          }
+        }
+      }
+
+      return {
+        fileId: fid,
+        fileRegNo: file.fileRegNo ?? null,
+        fileBarCode: file.fileBarCode ?? null,
+        memberName: member.memName ?? null,
+        memberNic: member.memNic ?? null,
+        plotNo: plot.plotNo ?? null,
+        installmentCount: fileRows.length,
+        totalDue: Math.round(totalDue * 100) / 100,
+        totalPaid: Math.round(totalPaid * 100) / 100,
+        balance: Math.round((totalDue - totalPaid) * 100) / 100,
+        statusCounts,
+        overdueCount,
+        nextDueDate,
+        installments: fileRows,
+      };
+    });
+
+    return {
+      groups,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
   },
 
   /**

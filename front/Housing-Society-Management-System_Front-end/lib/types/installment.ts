@@ -195,6 +195,23 @@ export interface InstallmentDashboardSummary {
   }>;
 }
 
+export interface InstallmentGroup {
+  fileId: string;
+  fileRegNo: string | null;
+  fileBarCode: string | null;
+  memberName: string | null;
+  memberNic: string | null;
+  plotNo: string | null;
+  installmentCount: number;
+  totalDue: number;
+  totalPaid: number;
+  balance: number;
+  statusCounts: Record<string, number>;
+  overdueCount: number;
+  nextDueDate: string | null;
+  installments: Installment[];
+}
+
 export interface InstallmentReportParams {
   startDate: Date | string;
   endDate: Date | string;

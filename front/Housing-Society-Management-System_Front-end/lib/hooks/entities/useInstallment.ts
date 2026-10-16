@@ -8,6 +8,7 @@ import {
   GenerateInstallmentsFromPlanDto,
   Installment,
   InstallmentDashboardSummary,
+  InstallmentGroup,
   InstallmentQueryParams,
   InstallmentReport,
   InstallmentReportParams,
@@ -60,6 +61,46 @@ export const useInstallments = (params: InstallmentQueryParams = {}) => {
         };
       }
       throw new Error(response.data.message || "Failed to fetch installments");
+    },
+  });
+};
+
+export const useGroupedInstallments = (params: InstallmentQueryParams = {}) => {
+  const queryKeyString = JSON.stringify(params);
+
+  return useQuery({
+    queryKey: [QUERY_KEY, "grouped", queryKeyString],
+    queryFn: async () => {
+      const queryParams: Record<string, any> = {
+        page: params.page ?? 1,
+        limit: params.limit ?? 20,
+      };
+
+      if (params.installmentCategoryId)
+        queryParams.installmentCategoryId = params.installmentCategoryId;
+      if (params.status) queryParams.status = params.status;
+      if (params.installmentType)
+        queryParams.installmentType = params.installmentType;
+      if (params.paymentMode) queryParams.paymentMode = params.paymentMode;
+      if (params.fromDate) queryParams.fromDate = params.fromDate;
+      if (params.toDate) queryParams.toDate = params.toDate;
+      if (params.overdue !== undefined) queryParams.overdue = params.overdue;
+      if (params.search) queryParams.search = params.search;
+
+      const response = await apiClient.get<{
+        groups: InstallmentGroup[];
+        pagination: PaginatedResponse<InstallmentGroup>["pagination"];
+      }>("/installment/grouped", { params: queryParams });
+
+      if (response.data.success) {
+        return {
+          items: response.data.data.groups,
+          pagination: response.data.data.pagination,
+        };
+      }
+      throw new Error(
+        response.data.message || "Failed to fetch grouped installments"
+      );
     },
   });
 };
