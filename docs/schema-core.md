@@ -209,3 +209,5 @@ isActive: Boolean, default: true
 
 **Hooks:** pre-save and pre-update set modifiedOn to current date
 **Indexes:** unique paymentModeName with collation en strength 2, partialFilterExpression isDeleted=false; compound {isActive, isDeleted}; text index on paymentModeName, description
+
+
