@@ -106,6 +106,46 @@ async function bookFile(
   return { fileId: fileRes.data.data._id as string, plotId };
 }
 
+function uniqCnic(): string {
+  const digits = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(-13).padStart(13, '0');
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
+}
+
+// A small, explicit share percentage - fx.memberId/memberId2 are shared
+// fixtures reused across every test in this file, and nominee shares aren't
+// cleaned up between tests (only in afterAll), so each nominee must leave
+// room for the next one on the same member instead of claiming the full 100%.
+async function createNominee(api: any, tracker: any, memId: string) {
+  const res = await api.post('/nominee', {
+    memId,
+    nomineeName: uniq('Xfer Rules Nominee '),
+    nomineeCNIC: uniqCnic(),
+    relationWithMember: 'Son',
+    nomineeContact: '03001234567',
+    nomineeSharePercentage: 1,
+  });
+  expect(res.status).toBe(201);
+  const nomineeId = res.data.data._id ?? res.data.data.id;
+  tracker.track('nominee', nomineeId);
+  return nomineeId as string;
+}
+
+async function approveAndExecuteTransfer(api: any, transferId: string, transferFee: number) {
+  await api.put(`/transfer/${transferId}`, { status: 'Approved' });
+  await api.post(`/transfer/${transferId}/pay-fee`, {
+    amount: transferFee,
+    paymentDate: new Date().toISOString(),
+    paymentMethod: 'Cash',
+  });
+  return api.post(`/transfer/${transferId}/execute`, {
+    executionDate: new Date().toISOString(),
+    witness1Name: 'Witness One',
+    witness1CNIC: '12345-1234567-1',
+    officerName: 'Officer One',
+    officerDesignation: 'Transfer Officer',
+  });
+}
+
 async function payOffFileInFull(api: any, fileId: string, contractPrice: number) {
   const listRes = await api.get(`/installment/file/${fileId}`);
   const installment = listRes.data.data[0];
@@ -392,7 +432,7 @@ describe('Transfer business rules', () => {
     expect(res.data.error).toMatch(/possession in progress/i);
   });
 
-  test('happy path: completed transfer moves ownership, clears the nominee, and preserves history', async () => {
+  test('happy path: completed transfer moves ownership, carries over the buyer nominee, and preserves history', async () => {
     const api = await getClient();
     const fx = await getBaseFixtures();
 
@@ -414,14 +454,17 @@ describe('Transfer business rules', () => {
       transactionRefNo: uniq('TXN-PRE-'),
     });
 
-    // Nominee named on the transfer itself - the rule is that File.nomineeId
-    // is explicitly cleared on completion, never copied from here.
+    // Nominee named on the transfer itself, belonging to the buyer - the rule
+    // is that this nominee carries over onto File.nomineeId on completion.
     const nomineeRes = await api.post('/nominee', {
       memId: fx.memberId2,
       nomineeName: 'Smoke Test Nominee',
       nomineeCNIC: '98765-1234567-2',
       relationWithMember: 'Son',
       nomineeContact: '03001234567',
+      // Small share, not 100% - fx.memberId2 is a shared fixture reused by
+      // later tests in this file, which also need to add their own nominee.
+      nomineeSharePercentage: 1,
     });
     expect(nomineeRes.status).toBe(201);
     tracker.track('nominee', nomineeRes.data.data._id ?? nomineeRes.data.data.id);
@@ -439,6 +482,7 @@ describe('Transfer business rules', () => {
     expect(createRes.status).toBe(201);
     const transferId = createRes.data.data._id ?? createRes.data.data.id;
     tracker.track('transfer', transferId);
+    const nomineeId = nomineeRes.data.data._id ?? nomineeRes.data.data.id;
 
     await api.put(`/transfer/${transferId}`, { status: 'Approved' });
     await api.post(`/transfer/${transferId}/pay-fee`, {
@@ -463,9 +507,10 @@ describe('Transfer business rules', () => {
     expect(String(memId)).toBe(fx.memberId2);
     // File status stays as-is (Pending here) under the new owner - a
     // completed transfer never changes file.status.
-    // The transfer named a nominee, but it must NOT carry over - cleared
-    // unconditionally so the buyer has to add their own.
-    expect(fileRes.data.data.nomineeId).toBeFalsy();
+    // The transfer named a nominee belonging to the buyer, so it carries
+    // over onto the file.
+    const fileNomineeId = fileRes.data.data.nomineeId?._id ?? fileRes.data.data.nomineeId;
+    expect(String(fileNomineeId)).toBe(String(nomineeId));
 
     const receiptsRes = await api.get(`/payment/by-target/installment/${installmentId}`);
     expect(receiptsRes.status).toBe(200);
@@ -524,5 +569,170 @@ describe('Transfer business rules', () => {
     });
     expect(execRes.status).toBe(200);
     expect(execRes.data.data.status).toBe('Completed');
+  });
+
+  test('nominee named on the transfer carries over to the file on execution', async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+    const transferType = await createTransferType(api, tracker, 1000);
+    const buyerNomineeId = await createNominee(api, tracker, fx.memberId2);
+
+    const createRes = await api.post('/transfer', {
+      fileId,
+      transferTypeId: transferType._id,
+      sellerMemId: fx.memberId,
+      buyerMemId: fx.memberId2,
+      transferInitDate: new Date().toISOString(),
+      transfIsAtt: true,
+      nomineeId: buyerNomineeId,
+    });
+    expect(createRes.status).toBe(201);
+    const transferId = createRes.data.data._id ?? createRes.data.data.id;
+    tracker.track('transfer', transferId);
+
+    const execRes = await approveAndExecuteTransfer(api, transferId, transferType.transferFee);
+    expect(execRes.status).toBe(200);
+
+    const fileRes = await api.get(`/file/${fileId}`);
+    const fileNomineeId = fileRes.data.data.nomineeId?._id ?? fileRes.data.data.nomineeId;
+    expect(String(fileNomineeId)).toBe(String(buyerNomineeId));
+  });
+
+  test('nominee is cleared from the file when the transfer names none', async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+
+    // Give the file a nominee before the transfer, so clearing it is a real
+    // observable change rather than it just staying unset.
+    const sellerNomineeId = await createNominee(api, tracker, fx.memberId);
+    const seedRes = await api.put(`/file/${fileId}`, { nomineeId: sellerNomineeId });
+    expect(seedRes.status).toBe(200);
+
+    const transferType = await createTransferType(api, tracker, 1000);
+    const createRes = await api.post('/transfer', {
+      fileId,
+      transferTypeId: transferType._id,
+      sellerMemId: fx.memberId,
+      buyerMemId: fx.memberId2,
+      transferInitDate: new Date().toISOString(),
+      transfIsAtt: true,
+      // No nomineeId named on this transfer.
+    });
+    expect(createRes.status).toBe(201);
+    const transferId = createRes.data.data._id ?? createRes.data.data.id;
+    tracker.track('transfer', transferId);
+
+    const execRes = await approveAndExecuteTransfer(api, transferId, transferType.transferFee);
+    expect(execRes.status).toBe(200);
+
+    const fileRes = await api.get(`/file/${fileId}`);
+    expect(fileRes.data.data.nomineeId).toBeFalsy();
+  });
+
+  test("the seller's nominee never carries over, even when the buyer names their own", async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+
+    const sellerNomineeId = await createNominee(api, tracker, fx.memberId);
+    const seedRes = await api.put(`/file/${fileId}`, { nomineeId: sellerNomineeId });
+    expect(seedRes.status).toBe(200);
+
+    const buyerNomineeId = await createNominee(api, tracker, fx.memberId2);
+    const transferType = await createTransferType(api, tracker, 1000);
+    const createRes = await api.post('/transfer', {
+      fileId,
+      transferTypeId: transferType._id,
+      sellerMemId: fx.memberId,
+      buyerMemId: fx.memberId2,
+      transferInitDate: new Date().toISOString(),
+      transfIsAtt: true,
+      nomineeId: buyerNomineeId,
+    });
+    expect(createRes.status).toBe(201);
+    const transferId = createRes.data.data._id ?? createRes.data.data.id;
+    tracker.track('transfer', transferId);
+
+    const execRes = await approveAndExecuteTransfer(api, transferId, transferType.transferFee);
+    expect(execRes.status).toBe(200);
+
+    const fileRes = await api.get(`/file/${fileId}`);
+    const fileNomineeId = fileRes.data.data.nomineeId?._id ?? fileRes.data.data.nomineeId;
+    expect(String(fileNomineeId)).toBe(String(buyerNomineeId));
+    expect(String(fileNomineeId)).not.toBe(String(sellerNomineeId));
+  });
+
+  test('transfer fee always comes from the transfer type, ignoring a different client-sent amount', async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+    const transferType = await createTransferType(api, tracker, 6000);
+
+    const createRes = await api.post('/transfer', {
+      fileId,
+      transferTypeId: transferType._id,
+      sellerMemId: fx.memberId,
+      buyerMemId: fx.memberId2,
+      transferInitDate: new Date().toISOString(),
+      // Attempt to override the fee - must be ignored server-side.
+      transferFeeAmount: 1,
+    });
+    expect(createRes.status).toBe(201);
+    const transferId = createRes.data.data._id ?? createRes.data.data.id;
+    tracker.track('transfer', transferId);
+
+    expect(createRes.data.data.transferFeeAmount).toBe(transferType.transferFee);
+
+    const fetchRes = await api.get(`/transfer/${transferId}`);
+    expect(fetchRes.data.data.transferFeeAmount).toBe(transferType.transferFee);
+  });
+
+  test("change-nominee rejects a nominee that does not belong to the file's current member", async () => {
+    const api = await getClient();
+    const fx = await getBaseFixtures();
+
+    const { fileId } = await bookFile(api, fx, tracker, {
+      memId: fx.memberId,
+      contractPrice: 100000,
+    });
+
+    const otherMemberNomineeId = await createNominee(api, tracker, fx.memberId2);
+    const rejectRes = await api.post(`/file/${fileId}/change-nominee`, {
+      nomineeId: otherMemberNomineeId,
+    });
+    expect(rejectRes.status).toBe(400);
+    expect(rejectRes.data.error).toMatch(/does not belong/i);
+
+    // A nominee that DOES belong to the file's current member is accepted.
+    const ownNomineeId = await createNominee(api, tracker, fx.memberId);
+    const acceptRes = await api.post(`/file/${fileId}/change-nominee`, {
+      nomineeId: ownNomineeId,
+    });
+    expect(acceptRes.status).toBe(200);
+    const fileNomineeId = acceptRes.data.data.nomineeId?._id ?? acceptRes.data.data.nomineeId;
+    expect(String(fileNomineeId)).toBe(String(ownNomineeId));
+
+    // Clearing it (omitting nomineeId) unsets it.
+    const clearRes = await api.post(`/file/${fileId}/change-nominee`, {});
+    expect(clearRes.status).toBe(200);
+    expect(clearRes.data.data.nomineeId).toBeFalsy();
   });
 });

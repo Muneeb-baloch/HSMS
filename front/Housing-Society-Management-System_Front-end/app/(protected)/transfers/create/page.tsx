@@ -38,40 +38,54 @@ const getMemberId = (v: unknown): string | undefined =>
     : undefined
 
 const transferFormFields: FieldConfig<TransferFormData>[] = [
-  // Seller Information
-  {
-    name: 'sellerMemId',
-    label: 'Seller',
-    type: 'relationship',
-    required: true,
-    relationship: {
-      endpoint: '/members',
-      labelField: 'memName',
-      valueField: '_id',
-      searchable: true
-    },
-    onChange: (
-      _value: unknown,
-      form: ReturnType<typeof useForm<TransferFormData>>
-    ) => {
-      form.setValue('fileId', '')
-    }
-  },
+  // File is picked first; the seller is derived from it (read-only below) -
+  // staff never hand-pick the seller, which would risk mismatching the file.
   {
     name: 'fileId',
     label: 'File',
     type: 'relationship',
     required: true,
-    showWhen: (values: TransferFormData) => !!values.sellerMemId,
     relationship: {
       endpoint: '/file',
       labelField: 'fileRegNo',
       valueField: '_id',
-      searchable: true,
-      queryParams: (values: TransferFormData) => {
-        const sellerId = getMemberId(values.sellerMemId)
-        return sellerId ? { memId: sellerId, limit: 50 } : {}
+      searchable: true
+    },
+    onChange: async (
+      value: unknown,
+      form: ReturnType<typeof useForm<TransferFormData>>
+    ) => {
+      // Buyer/nominee are scoped to the previous file's seller - reset both
+      // whenever the file changes so a stale pick can't carry over.
+      form.setValue('buyerMemId', '')
+      form.setValue('nomineeId', '')
+
+      const fileId = typeof value === 'string' ? value : ''
+      if (!fileId) {
+        form.setValue('sellerMemId', '')
+        return
       }
+      try {
+        const fileResponse = await apiClient.get<File>(`/file/${fileId}`)
+        form.setValue('sellerMemId', String(fileResponse.data.data.memId || ''))
+      } catch {
+        form.setValue('sellerMemId', '')
+      }
+    }
+  },
+  // Seller Information - auto-filled from the selected file, read-only
+  {
+    name: 'sellerMemId',
+    label: 'Seller',
+    type: 'relationship',
+    required: true,
+    disabled: true,
+    placeholder: 'Select a file first',
+    relationship: {
+      endpoint: '/members',
+      labelField: 'memberLabel',
+      valueField: '_id',
+      searchable: false
     }
   },
   {
@@ -84,10 +98,29 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
       labelField: 'typeName',
       valueField: '_id',
       searchable: true
+    },
+    onChange: async (
+      value: unknown,
+      form: ReturnType<typeof useForm<TransferFormData>>
+    ) => {
+      const typeId = typeof value === 'string' ? value : ''
+      if (!typeId) return
+      try {
+        const typeResponse = await apiClient.get<{ transferFee: number }>(
+          `/transfertype/${typeId}`
+        )
+        const fee = typeResponse.data.data?.transferFee
+        if (typeof fee === 'number') {
+          form.setValue('transferFeeAmount', fee)
+        }
+      } catch {
+        // Backend always recomputes the fee from the transfer type on
+        // create regardless, so a failed lookup here is just a display miss.
+      }
     }
   },
 
-  // Buyer Information
+  // Buyer Information - excludes the seller
   {
     name: 'buyerMemId',
     label: 'Buyer',
@@ -95,9 +128,13 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
     required: true,
     relationship: {
       endpoint: '/members',
-      labelField: 'memName',
+      labelField: 'memberLabel',
       valueField: '_id',
-      searchable: true
+      searchable: true,
+      queryParams: (values: TransferFormData) => {
+        const sellerId = getMemberId(values.sellerMemId)
+        return sellerId ? { excludeId: sellerId } : {}
+      }
     },
     onChange: (
       value: unknown,
@@ -133,7 +170,9 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
     label: 'Transfer Fee',
     type: 'number',
     required: false,
-    placeholder: 'Enter transfer fee amount'
+    disabled: true,
+    placeholder: 'Select a transfer type',
+    description: 'from transfer type'
   },
 
   // Witness Information
@@ -190,7 +229,7 @@ const transferFormFields: FieldConfig<TransferFormData>[] = [
   // Nominee (cascading: only nominees for selected buyer)
   {
     name: 'nomineeId',
-    label: 'Nominee',
+    label: "Buyer's nominee (optional)",
     type: 'relationship',
     required: false,
     showWhen: (values: TransferFormData) => !!getMemberId(values.buyerMemId),

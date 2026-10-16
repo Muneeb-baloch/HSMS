@@ -258,6 +258,37 @@ export const useUpdateFile = () => {
   });
 };
 
+export const useChangeNominee = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      nomineeId,
+    }: {
+      id: string;
+      nomineeId?: string;
+    }): Promise<File> => {
+      const response = await apiClient.post<File>(`/file/${id}/change-nominee`, {
+        nomineeId: nomineeId || undefined,
+      });
+
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || "Failed to change nominee");
+    },
+    onSuccess: (data) => {
+      customToast.success("Nominee updated successfully");
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY, data._id] });
+    },
+    onError: (error: Error) => {
+      customToast.error(error.message || "Failed to change nominee");
+    },
+  });
+};
+
 export const useDeleteFile = () => {
   const queryClient = useQueryClient();
 

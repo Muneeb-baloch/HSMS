@@ -22,6 +22,7 @@ import { useFile } from '@/lib/hooks/entities/useFile'
 import { usePaymentsByFile } from '@/lib/hooks/entities/usePayment'
 import { formatCurrency, formatDate } from '@/lib/utils/format'
 import { formatPlotType } from '@/lib/utils/plotUtils'
+import { ChangeNomineeModal } from '@/components/file/ChangeNomineeModal'
 import {
   ArrowLeft,
   Barcode,
@@ -34,10 +35,12 @@ import {
   Receipt,
   Tag,
   User,
-  UserCircle
+  UserCircle,
+  Users
 } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useState } from 'react'
 import { DetailPageSkeleton } from '@/components/shared/PageSkeleton'
 
 const TARGET_LABELS: Record<string, string> = {
@@ -52,6 +55,7 @@ export default function ViewFilePage () {
   const id = params.id as string
   const { data: file, isLoading } = useFile(id)
   const { data: payments, isLoading: paymentsLoading } = usePaymentsByFile(id)
+  const [changeNomineeOpen, setChangeNomineeOpen] = useState(false)
   if (isLoading) {
     return <DetailPageSkeleton />
   }
@@ -787,6 +791,16 @@ export default function ViewFilePage () {
                   View Member Profile
                 </Button>
               )}
+              {file.member && (
+                <Button
+                  variant='outline'
+                  className='w-full justify-start'
+                  onClick={() => setChangeNomineeOpen(true)}
+                >
+                  <Users className='mr-2 h-4 w-4' />
+                  Change Nominee
+                </Button>
+              )}
               <Button
                 variant='outline'
                 className='w-full justify-start'
@@ -891,6 +905,12 @@ export default function ViewFilePage () {
           </Card>
         </div>
       </div>
+
+      <ChangeNomineeModal
+        open={changeNomineeOpen}
+        onOpenChange={setChangeNomineeOpen}
+        file={file}
+      />
     </div>
   )
 }

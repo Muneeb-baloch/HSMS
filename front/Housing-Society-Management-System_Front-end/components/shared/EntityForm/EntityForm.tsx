@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -263,6 +264,9 @@ export function EntityForm<TFormData extends FieldValues> ({
                       />
                     )}
                   </FormControl>
+                  {fieldConfig.description && (
+                    <FormDescription>{fieldConfig.description}</FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )
