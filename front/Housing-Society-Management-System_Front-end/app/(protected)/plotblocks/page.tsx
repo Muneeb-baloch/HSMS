@@ -256,8 +256,7 @@ export default function PlotBlocksPage () {
                         >
                           {group.projectName}
                           {group.projectCode && (
-                            <span className='text-muted-foreground font-normal'>
-                              {' '}
+                            <span className='text-muted-foreground font-normal ml-1'>
                               ({group.projectCode})
                             </span>
                           )}
@@ -268,10 +267,16 @@ export default function PlotBlocksPage () {
                         </span>
                       )}
                     </div>
-                    <Badge variant='outline'>
-                      {group.rows.length} block
-                      {group.rows.length !== 1 ? 's' : ''}
-                    </Badge>
+                    <div className='flex items-center gap-2 shrink-0'>
+                      <Badge variant='outline'>
+                        {group.rows.length} block
+                        {group.rows.length !== 1 ? 's' : ''}
+                      </Badge>
+                      <Badge className='bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'>
+                        {group.rows.reduce((sum, row) => sum + (row.plots?.length || 0), 0)} plot
+                        {group.rows.reduce((sum, row) => sum + (row.plots?.length || 0), 0) !== 1 ? 's' : ''}
+                      </Badge>
+                    </div>
                   </button>
                   {!isCollapsed && (
                     <Table>
