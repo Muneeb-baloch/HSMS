@@ -27,7 +27,8 @@
     "sync-indexes": "tsx src/database/sync-indexes.ts",
     "test:watch": "NODE_ENV=test jest --watch",
     "test:coverage": "NODE_ENV=test jest --coverage",
-    "test:smoke": "bash scripts/run-smoke-tests.sh"
+    "test:smoke": "bash scripts/run-smoke-tests.sh",
+    "test:smoke:prod": "SMOKE_NODE_ENV=production bash scripts/run-smoke-tests.sh"
   },
   "keywords": [
     "node",

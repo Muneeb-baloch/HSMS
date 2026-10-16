@@ -13,11 +13,14 @@ export PORT=5002
 export SEED_ON_BOOT=true
 export LITE_MODE=1
 export ENABLE_OVERDUE_CRON=false
-# development (not test/production) so the error handler includes the real
-# error message in responses - needed to assert on specific rejection
-# reasons (e.g. "does not reconcile", "already allocated") instead of just
-# the generic "Internal server error" that's shown in test/production.
-export NODE_ENV=development
+# Business-rule rejections (plot already allocated, plan doesn't reconcile,
+# no plan details, duplicate bill/installment, overpayment) are AppError
+# instances, whose real message the error handler always returns regardless
+# of NODE_ENV - so this suite can run (and is required to pass) under
+# production too. Default to development locally for readable stack traces
+# on genuine 500s; SMOKE_NODE_ENV=production overrides for the parity check
+# (see package.json's test:smoke:prod).
+export NODE_ENV="${SMOKE_NODE_ENV:-development}"
 
 export SMOKE_API_URL="http://localhost:${PORT}/api"
 
@@ -48,7 +51,7 @@ SERVER_PID=$!
 
 echo "Waiting for server health..."
 READY=0
-for i in $(seq 1 60); do
+for i in $(seq 1 180); do
   if curl -s "http://localhost:${PORT}/health" >/dev/null 2>&1; then
     READY=1
     break

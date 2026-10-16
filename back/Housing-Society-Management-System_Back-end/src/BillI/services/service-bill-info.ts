@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import File from '../../File/models/models-file';
 import Member from '../../Member/models/models-member';
+import { AppError } from '../../middleware/error.middleware';
 import BillType from '../models/models-bill-type';
 import BillInfo, { BillStatus } from '../models/models-bill-info';
 import {
@@ -45,7 +46,7 @@ export const billInfoService = {
       });
 
       if (existingBill) {
-        throw new Error('Bill number already exists');
+        throw new AppError(400, 'Bill number already exists');
       }
     }
 
@@ -75,7 +76,8 @@ export const billInfoService = {
       isDeleted: false,
     });
     if (existingPeriodBill) {
-      throw new Error(
+      throw new AppError(
+        400,
         `A ${billTypeDoc.billTypeName} bill for ${data.billMonth} already exists for this file`
       );
     }
@@ -408,7 +410,8 @@ export const billInfoService = {
     const newAmountPaid = bill.amountPaid + data.paymentAmount;
 
     if (newAmountPaid > bill.totalPayable) {
-      throw new Error(
+      throw new AppError(
+        400,
         `Payment amount exceeds total payable. Maximum payment allowed: ${bill.totalPayable - bill.amountPaid}`
       );
     }

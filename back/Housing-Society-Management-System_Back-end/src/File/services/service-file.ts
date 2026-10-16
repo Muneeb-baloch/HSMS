@@ -2,6 +2,7 @@
 import { Types } from 'mongoose';
 import Application from '../../Application/models/models-application';
 import { runInTransaction } from '../../common/services/areaAllocation.service';
+import { AppError } from '../../middleware/error.middleware';
 import Installment from '../../Installment/models/models-installment';
 import InstallmentCategory, {
   InstallmentCategoryKind,
@@ -252,7 +253,7 @@ export const fileService = {
     });
 
     if (existingFileWithPlot) {
-      throw new Error('Plot is already allocated to another file');
+      throw new AppError(400, 'Plot is already allocated to another file');
     }
 
     // contractPrice is the file's one authoritative price, snapshotted from the
@@ -273,7 +274,7 @@ export const fileService = {
       .sort({ occurrence: 1 });
 
     if (planDetails.length === 0) {
-      throw new Error('Selected installment plan has no configured details');
+      throw new AppError(400, 'Selected installment plan has no configured details');
     }
 
     const { rows, reconciledTotal } = buildInstallmentRows({
@@ -283,7 +284,8 @@ export const fileService = {
     });
 
     if (Math.abs(reconciledTotal - contractPrice) > RECONCILIATION_TOLERANCE) {
-      throw new Error(
+      throw new AppError(
+        400,
         `Plan "${plan.planName}" does not reconcile: down payment + installment rows sum to ` +
           `${reconciledTotal}, but the plot's price is ${contractPrice}. Fix the plan's ` +
           'percentages/fixed amounts before booking against it.'
@@ -704,7 +706,7 @@ export const fileService = {
       });
 
       if (existingFileWithPlot) {
-        throw new Error('Plot is already allocated to another file');
+        throw new AppError(400, 'Plot is already allocated to another file');
       }
     }
 
@@ -1467,7 +1469,7 @@ export const fileService = {
     });
 
     if (existingFileWithPlot) {
-      throw new Error('Plot is already allocated to another file');
+      throw new AppError(400, 'Plot is already allocated to another file');
     }
 
     const updateObj: any = {

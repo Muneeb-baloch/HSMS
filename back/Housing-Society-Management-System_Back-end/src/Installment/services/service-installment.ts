@@ -222,7 +222,7 @@ export const installmentService = {
     });
 
     if (existingInstallment) {
-      throw new Error(`Installment number ${data.installmentNo} already exists for this file`);
+      throw new AppError(400, `Installment number ${data.installmentNo} already exists for this file`);
     }
 
     // Strip computed fields - totalPayable is ALWAYS recalculated by the model,
@@ -380,7 +380,7 @@ export const installmentService = {
       .sort({ occurrence: 1 });
 
     if (planDetails.length === 0) {
-      throw new Error('Selected installment plan has no configured details');
+      throw new AppError(400, 'Selected installment plan has no configured details');
     }
 
     // Basis is the file's own contractPrice snapshot (frozen at booking), never
@@ -395,7 +395,8 @@ export const installmentService = {
     });
 
     if (Math.abs(reconciledTotal - file.contractPrice) > RECONCILIATION_TOLERANCE) {
-      throw new Error(
+      throw new AppError(
+        400,
         `Plan "${plan.planName}" does not reconcile: down payment + installment rows sum to ` +
           `${reconciledTotal}, but the file's contract price is ${file.contractPrice}. Fix the ` +
           'plan\'s percentages/fixed amounts before generating.'
@@ -616,7 +617,7 @@ export const installmentService = {
       });
 
       if (duplicateInstallment) {
-        throw new Error(`Installment number ${data.installmentNo} already exists for this file`);
+        throw new AppError(400, `Installment number ${data.installmentNo} already exists for this file`);
       }
     }
 
@@ -754,7 +755,8 @@ export const installmentService = {
     const totalPayable = installment.totalPayable;
 
     if (newAmountPaid > totalPayable) {
-      throw new Error(
+      throw new AppError(
+        400,
         `Payment amount exceeds total payable. Maximum payment allowed: ${totalPayable - installment.amountPaid}`
       );
     }
